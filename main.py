@@ -660,6 +660,7 @@ class Track:
         self._precompute_map_lengths()
         self.billboard_font = pygame.font.Font(None, 16)
         self.grid_font = pygame.font.Font(None, 24)
+        self.gate_font = pygame.font.Font(None, 56)
         self.parallax_span = 3600
         self.city_blocks = self._generate_city_blocks()
         self.amusement_items = self._generate_amusement_items()
@@ -1160,6 +1161,91 @@ class Track:
             text_h = max(6, int(num_surface.get_height() * scale * 0.60))
             scaled_num = pygame.transform.smoothscale(num_surface, (text_w, text_h))
             screen.blit(scaled_num, (int(x - text_w // 2), int(y - text_h // 2)))
+
+    def _draw_gantry(self, screen, bands, view_delta, label):
+        center = self.project_from_bands(view_delta, 0.0, bands)
+        left = self.project_from_bands(view_delta, -1.12, bands)
+        right = self.project_from_bands(view_delta, 1.12, bands)
+        if not (center and left and right):
+            return
+
+        cx, cy, cscale = center
+        lx, ly, lscale = left
+        rx, ry, rscale = right
+        scale = max(0.10, min(cscale, lscale, rscale))
+
+        post_h = max(10, int(124 * scale))
+        post_w = max(3, int(11 * scale))
+        beam_h = max(5, int(24 * scale))
+        board_w = max(50, int(abs(rx - lx) * 0.70))
+        board_h = max(12, int(42 * scale))
+        top_y = int(min(ly, ry) - post_h)
+
+        post_color = (46, 166, 232)
+        post_shadow = (28, 98, 156)
+        beam_color = (44, 162, 228)
+        board_bg = (246, 210, 62)
+        board_border = (196, 46, 42)
+
+        # posts
+        pygame.draw.rect(screen, post_shadow, (int(lx - post_w // 2), int(top_y), post_w, int(ly - top_y)))
+        pygame.draw.rect(screen, post_color, (int(lx - post_w // 2 + 1), int(top_y + 1), max(1, post_w - 2), max(1, int(ly - top_y) - 2)))
+        pygame.draw.rect(screen, post_shadow, (int(rx - post_w // 2), int(top_y), post_w, int(ry - top_y)))
+        pygame.draw.rect(screen, post_color, (int(rx - post_w // 2 + 1), int(top_y + 1), max(1, post_w - 2), max(1, int(ry - top_y) - 2)))
+
+        # truss beam
+        beam_rect = pygame.Rect(int(lx), top_y, int(max(4, rx - lx)), beam_h)
+        pygame.draw.rect(screen, beam_color, beam_rect)
+        for i in range(0, beam_rect.w, max(8, int(20 * scale))):
+            pygame.draw.line(screen, (28, 104, 170), (beam_rect.x + i, beam_rect.y), (beam_rect.x + i, beam_rect.bottom), 1)
+
+        # board and checker corners
+        board_rect = pygame.Rect(int(cx - board_w // 2), int(top_y - board_h * 0.70), board_w, board_h)
+        pygame.draw.rect(screen, board_bg, board_rect)
+        pygame.draw.rect(screen, board_border, board_rect, 2)
+
+        check_size = max(2, int(7 * scale))
+        check_w = max(8, int(board_w * 0.16))
+        left_check = pygame.Rect(board_rect.x - check_w - 2, board_rect.y, check_w, board_rect.h)
+        right_check = pygame.Rect(board_rect.right + 2, board_rect.y, check_w, board_rect.h)
+        for check_rect in (left_check, right_check):
+            pygame.draw.rect(screen, (232, 232, 232), check_rect)
+            for y in range(check_rect.y, check_rect.bottom, check_size):
+                for x in range(check_rect.x, check_rect.right, check_size):
+                    if ((x - check_rect.x) // check_size + (y - check_rect.y) // check_size) % 2 == 0:
+                        pygame.draw.rect(screen, (24, 24, 24), (x, y, check_size, check_size))
+
+        text_surface = self.gate_font.render(label, True, (194, 32, 36))
+        text_w = max(20, int(text_surface.get_width() * scale * 0.55))
+        text_h = max(10, int(text_surface.get_height() * scale * 0.55))
+        text_scaled = pygame.transform.smoothscale(text_surface, (text_w, text_h))
+        screen.blit(text_scaled, (board_rect.centerx - text_w // 2, board_rect.centery - text_h // 2))
+
+        # race lights only for START gate
+        if label == "START":
+            light_r = max(2, int(6 * scale))
+            ly_base = int(cy - 10 * scale)
+            for i, color in enumerate(((196, 36, 36), (212, 182, 36), (36, 196, 72))):
+                pygame.draw.circle(screen, color, (int(cx - 16 * scale + i * 16 * scale), ly_base), light_r)
+
+    def draw_event_gates(self, screen, bands, camera_mode, anchor_distance, start_line_distance):
+        reverse = camera_mode == "REAR"
+        gate_items = [(start_line_distance, "START")]
+
+        checkpoint_count = max(1, int(self.length // self.checkpoint_distance))
+        for idx in range(1, checkpoint_count + 1):
+            gate_items.append(((idx * self.checkpoint_distance) % self.length, "CHECKPOINT"))
+
+        visible = []
+        for distance, label in gate_items:
+            delta = signed_track_delta(distance, anchor_distance, self.length)
+            view_delta = -delta if reverse else delta
+            if 16.0 < view_delta < bands[0]["ahead_far"]:
+                visible.append((view_delta, label))
+
+        visible.sort(reverse=True, key=lambda item: item[0])
+        for view_delta, label in visible:
+            self._draw_gantry(screen, bands, view_delta, label)
 
 
 class Car:
@@ -2582,6 +2668,13 @@ class PolePositionRacerGame:
             anchor_car.distance,
             self.start_line_distance,
             self.start_grid_slots,
+        )
+        self.track.draw_event_gates(
+            self.screen,
+            bands,
+            self.camera.mode,
+            anchor_car.distance,
+            self.start_line_distance,
         )
         self.track.draw_roadside(self.screen, bands, self.camera.mode, anchor_car.distance)
         self.track.draw_nitro_pickup(self.screen, bands, self.camera.mode, anchor_car.distance, self.player.lap)

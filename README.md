@@ -34,6 +34,7 @@ A retro arcade racing game inspired by classic 1980s sprite-scaling racers, buil
 - Winner name entry + best-lap leaderboard persistence (`leaderboard.json`)
 - 20 unique randomized car liveries every race
 - Parallax background with arcade city + amusement park motion
+- Pole Position style START gantry + visible CHECKPOINT gantries
 
 ## Requirements
 
