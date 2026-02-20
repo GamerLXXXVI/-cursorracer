@@ -3,6 +3,7 @@ import math
 import os
 import random
 import sys
+import colorsys
 from array import array
 from dataclasses import dataclass
 
@@ -45,13 +46,29 @@ def format_time(seconds):
     return f"{minutes:02d}:{remainder:05.2f}"
 
 
+def generate_unique_palette(count):
+    start_hue = random.random()
+    hues = [((start_hue + i * 0.61803398875) % 1.0) for i in range(count)]
+    random.shuffle(hues)
+    palette = []
+    for hue in hues:
+        sat = random.uniform(0.68, 0.95)
+        val = random.uniform(0.76, 1.00)
+        r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
+        palette.append((int(r * 255), int(g * 255), int(b * 255)))
+    return palette
+
+
 class SynthAudio:
     def __init__(self):
         self.enabled = True
         self.music_channel = None
         self.sfx_channel = None
+        self.engine_channel = None
         self.menu_loop = None
         self.race_loop = None
+        self.engine_layers = []
+        self.engine_index = -1
         self.beep_low = None
         self.beep_mid = None
         self.beep_high = None
@@ -66,6 +83,7 @@ class SynthAudio:
                 pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
             self.music_channel = pygame.mixer.Channel(0)
             self.sfx_channel = pygame.mixer.Channel(1)
+            self.engine_channel = pygame.mixer.Channel(2)
             self._build_sounds()
         except pygame.error:
             self.enabled = False
@@ -87,16 +105,21 @@ class SynthAudio:
             buffer.append(int(32767 * volume * value))
         return pygame.mixer.Sound(buffer=buffer.tobytes())
 
-    def _sequence(self, notes, step=0.14, volume=0.24):
+    def _sequence(self, notes, step=0.26, volume=0.18):
         sample_rate = 22050
         buffer = array("h")
-        for freq in notes:
+        for note_idx, freq in enumerate(notes):
             sample_count = int(sample_rate * step)
             for i in range(sample_count):
                 t = i / sample_rate
                 base = math.sin(2.0 * math.pi * freq * t)
-                pulse = 1.0 if math.sin(2.0 * math.pi * (freq * 0.5) * t) > 0 else -1.0
-                value = (base * 0.65 + pulse * 0.35) * volume
+                overtone = math.sin(2.0 * math.pi * (freq * 2.0) * t + note_idx * 0.3) * 0.40
+                sub = math.sin(2.0 * math.pi * (freq * 0.5) * t) * 0.34
+                pulse = 1.0 if math.sin(2.0 * math.pi * (freq * 0.25) * t) > 0 else -1.0
+                attack = clamp(i / max(1, int(sample_count * 0.14)), 0.0, 1.0)
+                release = clamp((sample_count - i) / max(1, int(sample_count * 0.22)), 0.0, 1.0)
+                envelope = min(attack, release)
+                value = (base * 0.50 + overtone * 0.28 + sub * 0.18 + pulse * 0.04) * volume * envelope
                 buffer.append(int(32767 * value))
         return pygame.mixer.Sound(buffer=buffer.tobytes())
 
@@ -109,6 +132,23 @@ class SynthAudio:
             buffer.append(int(32767 * v))
         return pygame.mixer.Sound(buffer=buffer.tobytes())
 
+    def _engine_layer(self, base_hz, duration=0.22):
+        sample_rate = 22050
+        sample_count = int(sample_rate * duration)
+        buffer = array("h")
+        for i in range(sample_count):
+            t = i / sample_rate
+            fundamental = math.sin(2.0 * math.pi * base_hz * t)
+            harmonic2 = math.sin(2.0 * math.pi * base_hz * 2.02 * t + 0.35) * 0.55
+            harmonic3 = math.sin(2.0 * math.pi * base_hz * 3.07 * t + 0.62) * 0.34
+            rasp = ((2.0 * ((t * base_hz * 1.02) % 1.0)) - 1.0) * 0.20
+            jitter = math.sin(2.0 * math.pi * (base_hz * 0.12) * t) * 0.08
+            turbulence = math.sin(2.0 * math.pi * base_hz * 6.4 * t + math.sin(t * 24.0)) * 0.08
+            value = (fundamental * 0.45 + harmonic2 + harmonic3 + rasp + jitter + turbulence) * 0.37
+            value = clamp(value, -1.0, 1.0)
+            buffer.append(int(32767 * value))
+        return pygame.mixer.Sound(buffer=buffer.tobytes())
+
     def _build_sounds(self):
         self.beep_low = self._tone(520, 0.10, 0.45, "square")
         self.beep_mid = self._tone(660, 0.10, 0.42, "square")
@@ -119,20 +159,55 @@ class SynthAudio:
         self.pit = self._tone(420, 0.18, 0.30, "square")
         self.shift = self._tone(700, 0.06, 0.25, "sine")
 
-        self.menu_loop = self._sequence([220, 330, 440, 330, 247, 370, 494, 370], step=0.18, volume=0.20)
-        self.race_loop = self._sequence([294, 440, 370, 554, 330, 494, 370, 440], step=0.12, volume=0.22)
+        self.menu_loop = self._sequence([130, 196, 220, 175, 147, 220, 247, 196], step=0.24, volume=0.16)
+        self.race_loop = self._sequence([110, 147, 131, 165, 147, 196, 165, 131], step=0.30, volume=0.11)
+        self.engine_layers = [self._engine_layer(42.0 + i * 8.2) for i in range(18)]
 
     def play_menu_music(self):
         if self.enabled and self.menu_loop:
+            self.music_channel.set_volume(0.34)
             self.music_channel.play(self.menu_loop, loops=-1)
+        self.stop_engine()
 
     def play_race_music(self):
         if self.enabled and self.race_loop:
+            self.music_channel.set_volume(0.16)
             self.music_channel.play(self.race_loop, loops=-1)
 
     def stop_music(self):
         if self.enabled and self.music_channel:
             self.music_channel.stop()
+
+    def stop_engine(self):
+        if not self.enabled or not self.engine_channel:
+            return
+        self.engine_channel.fadeout(100)
+        self.engine_index = -1
+
+    def update_engine(self, rpm, throttle=False, active=True, crashed=False):
+        if not self.enabled or not self.engine_channel or not self.engine_layers:
+            return
+        if not active:
+            if self.engine_channel.get_busy():
+                self.engine_channel.fadeout(120)
+            self.engine_index = -1
+            return
+
+        rpm_ratio = clamp(rpm / 9800.0, 0.0, 1.35)
+        idx = int((rpm_ratio / 1.35) * (len(self.engine_layers) - 1))
+        if throttle:
+            idx = min(len(self.engine_layers) - 1, idx + 1)
+        if crashed:
+            idx = max(0, idx - 4)
+
+        if idx != self.engine_index or not self.engine_channel.get_busy():
+            self.engine_channel.play(self.engine_layers[idx], loops=-1, fade_ms=80)
+            self.engine_index = idx
+
+        volume = 0.16 + rpm_ratio * 0.58 + (0.10 if throttle else 0.0)
+        if crashed:
+            volume *= 0.55
+        self.engine_channel.set_volume(clamp(volume, 0.08, 0.90))
 
     def play_countdown_beep(self, stage):
         if not self.enabled:
@@ -809,36 +884,54 @@ class Car:
     @classmethod
     def _ensure_font(cls):
         if cls.number_font is None:
-            cls.number_font = pygame.font.Font(None, 20)
+            cls.number_font = pygame.font.Font(None, 18)
 
     def _create_car_sprite(self, color, number, is_player):
         self._ensure_font()
-        sprite = pygame.Surface((46, 78), pygame.SRCALPHA)
+        sprite = pygame.Surface((60, 90), pygame.SRCALPHA)
         c = color
-        dark = (max(0, c[0] - 60), max(0, c[1] - 60), max(0, c[2] - 60))
-        light = (min(255, c[0] + 38), min(255, c[1] + 38), min(255, c[2] + 38))
+        dark = (max(0, c[0] - 72), max(0, c[1] - 72), max(0, c[2] - 72))
+        light = (min(255, c[0] + 46), min(255, c[1] + 46), min(255, c[2] + 46))
+        accent = (min(255, c[0] + 90), min(255, c[1] + 18), max(0, c[2] - 12))
 
-        # Body
-        pygame.draw.rect(sprite, dark, (10, 8, 26, 56))
-        pygame.draw.rect(sprite, c, (12, 12, 22, 50))
-        pygame.draw.rect(sprite, light, (14, 14, 18, 20))
-        # Nose
-        pygame.draw.rect(sprite, c, (18, 2, 10, 12))
-        # Rear wing
-        pygame.draw.rect(sprite, dark, (6, 58, 34, 7))
-        # Wheels
-        pygame.draw.rect(sprite, (22, 22, 22), (2, 16, 8, 16))
-        pygame.draw.rect(sprite, (22, 22, 22), (36, 16, 8, 16))
-        pygame.draw.rect(sprite, (22, 22, 22), (2, 48, 8, 16))
-        pygame.draw.rect(sprite, (22, 22, 22), (36, 48, 8, 16))
-        # Cockpit
-        pygame.draw.rect(sprite, (18, 84, 188), (16, 28, 14, 16))
-        # Number
+        # Wheels and tire blocks
+        wheel = (22, 22, 24)
+        pygame.draw.rect(sprite, wheel, (2, 12, 12, 26))
+        pygame.draw.rect(sprite, wheel, (46, 12, 12, 26))
+        pygame.draw.rect(sprite, wheel, (4, 50, 10, 22))
+        pygame.draw.rect(sprite, wheel, (46, 50, 10, 22))
+
+        # Rear wing and endplates
+        pygame.draw.rect(sprite, dark, (11, 6, 38, 8))
+        pygame.draw.rect(sprite, accent, (9, 8, 42, 5))
+        pygame.draw.rect(sprite, dark, (7, 5, 4, 11))
+        pygame.draw.rect(sprite, dark, (49, 5, 4, 11))
+
+        # Main body and sidepods
+        pygame.draw.polygon(sprite, dark, [(18, 14), (42, 14), (38, 60), (22, 60)])
+        pygame.draw.polygon(sprite, c, [(20, 16), (40, 16), (36, 58), (24, 58)])
+        pygame.draw.polygon(sprite, light, [(22, 18), (38, 18), (34, 34), (26, 34)])
+        pygame.draw.rect(sprite, dark, (13, 34, 10, 16))
+        pygame.draw.rect(sprite, dark, (37, 34, 10, 16))
+        pygame.draw.rect(sprite, accent, (14, 36, 8, 10))
+        pygame.draw.rect(sprite, accent, (38, 36, 8, 10))
+
+        # Nose cone and front wing
+        pygame.draw.polygon(sprite, c, [(27, 56), (33, 56), (35, 80), (25, 80)])
+        pygame.draw.polygon(sprite, light, [(28, 58), (32, 58), (33, 76), (27, 76)])
+        pygame.draw.rect(sprite, dark, (10, 78, 40, 5))
+        pygame.draw.rect(sprite, accent, (9, 82, 42, 4))
+
+        # Cockpit / driver canopy
+        pygame.draw.rect(sprite, (20, 92, 192), (24, 30, 12, 15))
+        pygame.draw.rect(sprite, (114, 206, 255), (25, 31, 10, 6))
+
+        # Number on engine cover
         number_text = self.number_font.render(str(number), True, (250, 250, 250))
-        sprite.blit(number_text, (23 - number_text.get_width() // 2, 46))
+        sprite.blit(number_text, (30 - number_text.get_width() // 2, 48))
 
         if is_player:
-            pygame.draw.rect(sprite, (250, 240, 90), (14, 66, 18, 6))
+            pygame.draw.rect(sprite, (250, 240, 90), (23, 22, 14, 4))
         return sprite
 
     @property
@@ -894,15 +987,21 @@ class Car:
 
     def _auto_shift(self):
         speed_kmh = self.speed * 3.6
-        thresholds = [0, 30, 70, 110, 150, 190, 230, 270]
-        for gear in range(1, 8):
-            low = thresholds[gear - 1]
-            high = thresholds[gear]
-            if low <= speed_kmh < high:
-                self.gear = gear
-                break
-        if speed_kmh >= thresholds[-1]:
-            self.gear = 7
+        thresholds = self._gear_speed_limits_kmh()
+        while self.gear < 7 and speed_kmh > thresholds[self.gear] + 4.0:
+            self.gear += 1
+        while self.gear > 1 and speed_kmh < thresholds[self.gear - 1] - 10.0:
+            self.gear -= 1
+
+    def _gear_speed_limits_kmh(self):
+        if self.transmission_mode == "automatic":
+            return [0.0, 54.0, 96.0, 142.0, 192.0, 246.0, 300.0, 346.0]
+        return [0.0, 60.0, 108.0, 160.0, 220.0, 282.0, 342.0, 402.0]
+
+    def _gear_accel_profile(self):
+        if self.transmission_mode == "automatic":
+            return [0.0, 32.0, 29.0, 25.0, 22.0, 19.0, 16.0, 14.0]
+        return [0.0, 38.0, 35.0, 31.0, 28.0, 25.0, 22.0, 19.0]
 
     def shift_up(self):
         if self.transmission_mode != "manual":
@@ -911,13 +1010,15 @@ class Car:
             return "locked"
         if self.gear >= 7:
             return "max"
-        if self.rpm > self.redline * 1.03:
-            self.shift_penalty_timer = random.uniform(3.0, 4.0)
-        elif self.rpm >= self.redline * 0.90:
-            self.perfect_shift_boost = max(self.perfect_shift_boost, 0.85)
+        rough_shift = False
+        if self.rpm > self.redline * 1.10:
+            self.shift_penalty_timer = random.uniform(2.6, 3.4)
+            rough_shift = True
+        elif self.redline * 0.88 <= self.rpm <= self.redline * 1.01:
+            self.perfect_shift_boost = max(self.perfect_shift_boost, 1.25)
         self.gear += 1
-        self.rpm *= 0.63
-        return "ok"
+        self.rpm *= 0.66
+        return "overrev" if rough_shift else "ok"
 
     def shift_down(self):
         if self.transmission_mode != "manual":
@@ -927,7 +1028,9 @@ class Car:
         if self.gear <= 1:
             return "min"
         self.gear -= 1
-        self.rpm *= 1.16
+        self.rpm *= 1.12
+        if self.rpm > self.redline * 1.16:
+            self.shift_penalty_timer = max(self.shift_penalty_timer, 1.0)
         return "ok"
 
     def grant_nitro(self):
@@ -955,12 +1058,21 @@ class Car:
         return True
 
     def _update_rpm(self, dt, throttle):
-        gear_ratios = [0.0, 3.35, 2.56, 2.02, 1.62, 1.33, 1.12, 0.94]
-        target_rpm = 1000.0 + self.speed * gear_ratios[self.gear] * 125.0
+        limits = self._gear_speed_limits_kmh()
+        high_limit = limits[self.gear] / 3.6
+        speed_ratio = clamp(self.speed / max(high_limit, 0.1), 0.0, 1.35)
+
+        target_rpm = 920.0 + speed_ratio * (self.redline - 920.0) * 0.98
         if throttle:
-            target_rpm += 750.0
-        self.rpm += (target_rpm - self.rpm) * dt * 8.0
-        self.rpm = clamp(self.rpm, 800.0, 11000.0)
+            target_rpm += 420.0
+        if self.nitro_timer > 0:
+            target_rpm += 240.0
+        if self.shift_penalty_timer > 0:
+            target_rpm = min(target_rpm, self.redline * 0.78)
+
+        response = 10.0 if throttle else 7.0
+        self.rpm += (target_rpm - self.rpm) * dt * response
+        self.rpm = clamp(self.rpm, 850.0, 11200.0)
 
     def update_player(self, dt, track, weather, throttle, brake, steer, allow_drive, race_elapsed):
         if self.finished:
@@ -970,7 +1082,7 @@ class Car:
             self.crash_timer -= dt
             if self.crash_timer <= 0 and not self.eliminated:
                 self.lane = 0.0
-                self.speed = 14.0
+                self.speed = 18.0
             return
 
         if self.shift_penalty_timer > 0:
@@ -982,14 +1094,17 @@ class Car:
         traction = weather.traction * (0.62 + (self.tire / 100.0) * 0.38)
         traction = clamp(traction, 0.35, 1.1)
 
-        max_speed = 95.0
+        speed_limits = [limit / 3.6 for limit in self._gear_speed_limits_kmh()]
+        gear_accel = self._gear_accel_profile()
+
+        max_speed = speed_limits[7]
         if self.transmission_mode == "automatic":
-            max_speed *= 0.94
+            max_speed *= 0.95
         if self.perfect_shift_boost > 0:
-            max_speed *= 1.08
+            max_speed *= 1.11
             self.perfect_shift_boost = max(0.0, self.perfect_shift_boost - dt)
         if self.nitro_timer > 0:
-            max_speed *= 1.35
+            max_speed *= 1.30
             self.nitro_timer = max(0.0, self.nitro_timer - dt)
 
         if self.fuel <= 0 or self.tire <= 0:
@@ -999,40 +1114,48 @@ class Car:
             self._advance_track_progress(self.speed * dt, track.length, race_elapsed)
             return
 
-        gear_accel = [0.0, 27.0, 23.0, 19.0, 16.0, 13.0, 10.0, 8.2]
-        if self.transmission_mode == "automatic":
-            gear_accel = [0.0, 24.0, 20.0, 16.8, 14.0, 11.4, 9.0, 7.2]
-
         effective_throttle = throttle and allow_drive and self.shift_penalty_timer <= 0.0
         if effective_throttle:
-            self.speed += gear_accel[self.gear] * traction * dt
-        if brake and allow_drive:
-            self.speed -= 40.0 * dt
+            gear_cap = speed_limits[self.gear]
+            cap_ratio = clamp(1.0 - (self.speed / max(gear_cap, 0.01)), 0.32, 1.12)
+            accel_force = gear_accel[self.gear] * cap_ratio * traction
+            if self.speed > gear_cap:
+                accel_force *= 0.48
+            self.speed += accel_force * dt
+        elif allow_drive:
+            self.speed -= (2.2 + self.speed * 0.020) * dt
 
-        drag = 5.4 + self.speed * 0.058
+        if brake and allow_drive:
+            brake_force = 52.0 + self.speed * 0.10
+            self.speed -= brake_force * dt
+
+        drag = 1.2 + self.speed * 0.014 + (self.speed * self.speed) * 0.00035
+        if not effective_throttle:
+            drag *= 1.12
         self.speed -= drag * dt
 
         off_road = abs(self.lane) > 1.05
         if off_road:
-            self.speed -= 13.0 * dt
+            self.speed -= (11.0 + self.speed * 0.09) * dt
 
         self.speed = clamp(self.speed, 0.0, max_speed)
 
         if allow_drive:
-            steer_force = weather.steer_response * dt * (0.56 + self.speed / 100.0)
+            speed_ratio = clamp(self.speed / max(max_speed, 0.01), 0.0, 1.0)
+            steer_force = weather.steer_response * dt * (0.92 - speed_ratio * 0.42)
             self.lane += steer * steer_force
             if weather.name == "SNOW":
-                self.snow_slide += steer * dt * 0.65
-                self.snow_slide *= max(0.0, 1.0 - 1.8 * dt)
+                self.snow_slide += steer * dt * 0.78
+                self.snow_slide *= max(0.0, 1.0 - 1.4 * dt)
                 self.lane += self.snow_slide
 
         self.lane = clamp(self.lane, -1.48, 1.48)
         self._update_rpm(dt, effective_throttle)
 
-        fuel_rate = 0.03 + self.speed * 0.006 + (0.05 if effective_throttle else 0.0)
-        tire_rate = 0.05 + abs(steer) * self.speed * 0.01 + (1.0 - traction) * 0.35 + (0.07 if off_road else 0.0)
+        fuel_rate = 0.025 + self.speed * 0.0048 + (0.045 if effective_throttle else 0.0)
+        tire_rate = 0.045 + abs(steer) * self.speed * 0.008 + (1.0 - traction) * 0.35 + (0.07 if off_road else 0.0)
         if self.nitro_timer > 0:
-            tire_rate += 0.08
+            tire_rate += 0.10
 
         self.fuel = max(0.0, self.fuel - fuel_rate * dt)
         self.tire = max(0.0, self.tire - tire_rate * dt)
@@ -1396,41 +1519,24 @@ class PolePositionRacerGame:
 
     def _spawn_ai_grid(self):
         self.ai_cars.clear()
-        palette = [
-            (222, 82, 54),
-            (72, 180, 244),
-            (226, 220, 88),
-            (120, 232, 110),
-            (255, 138, 36),
-            (210, 102, 236),
-            (84, 220, 190),
-            (244, 116, 186),
-            (138, 190, 255),
-            (246, 166, 84),
-            (175, 238, 108),
-            (225, 132, 132),
-            (120, 220, 246),
-            (246, 212, 132),
-            (118, 206, 134),
-            (214, 148, 246),
-            (236, 206, 88),
-            (132, 234, 236),
-            (236, 124, 74),
-        ]
-        for idx in range(19):
-            skill = random.uniform(0.45, 1.00)
-            aggression = random.uniform(0.30, 1.00)
-            ai = AIDriver(f"AI-{idx + 1:02d}", palette[idx % len(palette)], idx + 1, skill, aggression)
-            ai.distance = 26.0 + idx * 9.2
-            ai.total_distance = ai.distance
-            ai.lane = ((idx % 4) - 1.5) * 0.26 + random.uniform(-0.05, 0.05)
-            self.ai_cars.append(ai)
+        palette = generate_unique_palette(TOTAL_RACERS)
 
         self.player.reset_for_race()
         self.player.transmission_mode = self.transmission_setting
         self.player.distance = 0.0
         self.player.total_distance = 0.0
         self.player.lane = 0.0
+        self.player.color = palette[0]
+        self.player.sprite = self.player._create_car_sprite(self.player.color, self.player.number, True)
+
+        for idx in range(19):
+            skill = random.uniform(0.45, 1.00)
+            aggression = random.uniform(0.30, 1.00)
+            ai = AIDriver(f"AI-{idx + 1:02d}", palette[idx + 1], idx + 1, skill, aggression)
+            ai.distance = 26.0 + idx * 9.2
+            ai.total_distance = ai.distance
+            ai.lane = ((idx % 4) - 1.5) * 0.26 + random.uniform(-0.05, 0.05)
+            self.ai_cars.append(ai)
 
     def _load_leaderboard(self):
         if not os.path.exists(self.leaderboard_path):
@@ -1558,6 +1664,7 @@ class PolePositionRacerGame:
     def _update_countdown(self, dt):
         prior = int(math.ceil(self.countdown_timer))
         self.countdown_timer -= dt
+        self.player._update_rpm(dt, False)
         current = int(math.ceil(max(self.countdown_timer, 0.0)))
         if current < prior:
             if current > 0:
@@ -1567,6 +1674,7 @@ class PolePositionRacerGame:
                 self._add_message("GO GO GO!", 2.0)
         if self.countdown_timer <= 0:
             self.state = "race"
+        self.audio.update_engine(self.player.rpm, throttle=False, active=True, crashed=False)
 
     def _process_race_keydowns(self, events):
         for event in events:
@@ -1586,6 +1694,9 @@ class PolePositionRacerGame:
                 outcome = self.player.shift_up()
                 if outcome == "ok":
                     self.audio.play_shift()
+                elif outcome == "overrev":
+                    self.audio.play_shift()
+                    self._add_message("ROUGH SHIFT! POWER LOSS", 1.4)
                 elif outcome == "locked":
                     self._add_message("OVER-REV! SHIFT LOCK", 1.8)
             elif event.key == pygame.K_RSHIFT:
@@ -1596,9 +1707,14 @@ class PolePositionRacerGame:
                 self.player.headlights_on = not self.player.headlights_on
                 if self.player.headlights_on:
                     self._add_message("HEADLIGHTS ON", 1.4)
-            elif event.key == pygame.K_w and self.weather.requires_wipers:
-                self.player.wipers_on = True
-                self._add_message("WIPERS ACTIVATED", 1.2)
+                else:
+                    self._add_message("HEADLIGHTS OFF", 1.4)
+            elif event.key == pygame.K_1 and self.weather.requires_wipers:
+                self.player.wipers_on = not self.player.wipers_on
+                if self.player.wipers_on:
+                    self._add_message("WIPERS ON", 1.2)
+                else:
+                    self._add_message("WIPERS OFF", 1.2)
 
     def _update_race(self, dt, events, keys):
         self._process_race_keydowns(events)
@@ -1672,6 +1788,15 @@ class PolePositionRacerGame:
 
         self._compute_positions()
 
+        throttle_audio = throttle and allow_drive and self.player.shift_penalty_timer <= 0.0
+        engine_active = not self.player.eliminated and not self.player.finished
+        self.audio.update_engine(
+            self.player.rpm,
+            throttle=throttle_audio,
+            active=engine_active,
+            crashed=self.player.crash_timer > 0,
+        )
+
         if self.player.finished:
             self._enter_post_race(dnf=False)
 
@@ -1688,6 +1813,8 @@ class PolePositionRacerGame:
                 self.ai_finish_log.append((ai.name, ai.finish_time))
 
         self._compute_positions()
+        leader = sorted(self.ai_cars, key=lambda car: car.progress, reverse=True)[0]
+        self.audio.update_engine(leader.rpm, throttle=True, active=True, crashed=False)
         self.spectator_timer -= dt
         done = self.spectator_timer <= 0
         for event in events:
@@ -1726,8 +1853,10 @@ class PolePositionRacerGame:
 
         if self.state == "intro":
             self._update_intro(dt, events)
+            self.audio.update_engine(0.0, active=False)
         elif self.state == "menu":
             self._update_menu(events)
+            self.audio.update_engine(0.0, active=False)
         elif self.state == "countdown":
             self._update_countdown(dt)
             self._update_messages(dt)
@@ -1738,8 +1867,10 @@ class PolePositionRacerGame:
             self._update_spectator(dt, events)
         elif self.state == "name_entry":
             self._update_name_entry(events)
+            self.audio.update_engine(0.0, active=False)
         elif self.state == "post_race":
             self._update_post_race(events)
+            self.audio.update_engine(0.0, active=False)
 
     def _draw_intro(self):
         self.screen.fill((8, 12, 20))
@@ -1800,7 +1931,7 @@ class PolePositionRacerGame:
             "LEFT SHIFT / RIGHT SHIFT - MANUAL GEARS",
             "INSERT - NITRO (MANUAL ONLY)",
             "SPACE - PIT STOP ENTRY (MANDATORY LAP 2)",
-            "C - CAMERA TOGGLE   H - HEADLIGHTS   W - WIPERS",
+            "C - CAMERA TOGGLE   H - HEADLIGHTS   1 - WIPERS",
         ]
         for i, line in enumerate(controls):
             txt = small_font.render(line, True, (188, 212, 242))
@@ -1877,7 +2008,7 @@ class PolePositionRacerGame:
             else:
                 player_x = WIDTH // 2 - int(self.player.lane * 90)
             player_y = HEIGHT - 56
-            self.player.draw(self.screen, player_x, player_y, 2.1, show_flames=self.player.nitro_timer > 0)
+            self.player.draw(self.screen, player_x, player_y, 1.85, show_flames=self.player.nitro_timer > 0)
             if self.player.crash_timer > 0:
                 self._draw_explosion(player_x, player_y - 40, self.player.crash_timer)
 

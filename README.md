@@ -11,11 +11,12 @@ A retro arcade racing game inspired by classic 1980s sprite-scaling racers, buil
 - Quarter-mile checkpoint timer system
 - Manual 7-gear transmission with RPM/redline behavior
 - Automatic mode (no manual shifting, no nitro, slightly slower)
+- Dynamic procedural engine audio that changes with RPM/throttle
 - Nitro pickup/activation (manual mode only)
 - Mandatory pit stop on lap 2 with animated sequence
 - Random weather each race:
   - Clear
-  - Rain (activate wipers with `W`)
+  - Rain (activate wipers with `1`)
   - Thunderstorm (lightning flashes)
   - Fog
   - Snow (slippery traction)
@@ -28,6 +29,7 @@ A retro arcade racing game inspired by classic 1980s sprite-scaling racers, buil
 - Mini-map with racer markers and AI finish-time feed
 - End-of-race order/lap times/total time
 - Winner name entry + best-lap leaderboard persistence (`leaderboard.json`)
+- 20 unique randomized car liveries every race
 
 ## Requirements
 
@@ -65,7 +67,7 @@ python3 main.py
 - `Insert` - Activate Nitro (manual mode only)
 - `Space` - Enter pit lane (lap 2 mandatory pit window)
 - `C` - Toggle camera (chase / rear / bumper)
-- `W` - Activates wipers during rain/thunderstorm
+- `1` - Toggle wipers during rain/thunderstorm
 - `H` - Toggle headlights during night weather
 - `Esc` - Back to menu / quit from menu
 
