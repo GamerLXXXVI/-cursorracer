@@ -22,6 +22,15 @@ CHECKPOINT_DISTANCE_M = 402.336  # quarter mile
 PLAYER_START_TIME = 60.0
 CHECKPOINT_TIME_BONUS = 30.0
 
+SPRITE_SHEET_CANDIDATES = [
+    "spritesheet.png",
+    "car_spritesheet.png",
+    "pole_position_spritesheet.png",
+    "assets/spritesheet.png",
+    "assets/car_spritesheet.png",
+    "assets/pole_position_spritesheet.png",
+]
+
 
 def clamp(value, low, high):
     return max(low, min(high, value))
@@ -59,16 +68,150 @@ def generate_unique_palette(count):
     return palette
 
 
+class SpriteBank:
+    loaded = False
+    loaded_path = None
+    car_frames = []
+    explosion_frames = []
+    background_key = (0, 0, 0)
+
+    @classmethod
+    def _is_bg_like(cls, rgb, bg_rgb):
+        diff = abs(rgb[0] - bg_rgb[0]) + abs(rgb[1] - bg_rgb[1]) + abs(rgb[2] - bg_rgb[2])
+        return diff <= 36
+
+    @classmethod
+    def _extract_blobs(cls, surface, bg_rgb):
+        width, height = surface.get_size()
+        visited = bytearray(width * height)
+        boxes = []
+        min_area = 64
+
+        for y in range(height):
+            for x in range(width):
+                idx = y * width + x
+                if visited[idx]:
+                    continue
+                color = surface.get_at((x, y))
+                if color.a < 10 or cls._is_bg_like(color[:3], bg_rgb):
+                    visited[idx] = 1
+                    continue
+
+                stack = [(x, y)]
+                visited[idx] = 1
+                min_x = x
+                max_x = x
+                min_y = y
+                max_y = y
+                area = 0
+
+                while stack:
+                    cx, cy = stack.pop()
+                    area += 1
+                    if cx < min_x:
+                        min_x = cx
+                    if cx > max_x:
+                        max_x = cx
+                    if cy < min_y:
+                        min_y = cy
+                    if cy > max_y:
+                        max_y = cy
+
+                    for nx, ny in ((cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)):
+                        if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                            continue
+                        nidx = ny * width + nx
+                        if visited[nidx]:
+                            continue
+                        ncolor = surface.get_at((nx, ny))
+                        if ncolor.a < 10 or cls._is_bg_like(ncolor[:3], bg_rgb):
+                            visited[nidx] = 1
+                            continue
+                        visited[nidx] = 1
+                        stack.append((nx, ny))
+
+                if area >= min_area:
+                    boxes.append((min_x, min_y, max_x, max_y, area))
+
+        boxes.sort(key=lambda box: (box[1], box[0]))
+        return boxes
+
+    @classmethod
+    def _crop_box(cls, surface, box, pad=1):
+        width, height = surface.get_size()
+        min_x, min_y, max_x, max_y, _ = box
+        x = max(0, min_x - pad)
+        y = max(0, min_y - pad)
+        w = min(width - x, (max_x - min_x + 1) + pad * 2)
+        h = min(height - y, (max_y - min_y + 1) + pad * 2)
+        rect = pygame.Rect(x, y, w, h)
+        sprite = pygame.Surface(rect.size, pygame.SRCALPHA)
+        sprite.blit(surface, (0, 0), rect)
+        return sprite
+
+    @classmethod
+    def load_optional_sheet(cls):
+        if cls.loaded:
+            return
+        cls.loaded = True
+
+        root = os.path.dirname(__file__)
+        for rel_path in SPRITE_SHEET_CANDIDATES:
+            path = os.path.join(root, rel_path)
+            if not os.path.exists(path):
+                continue
+            try:
+                sheet = pygame.image.load(path).convert_alpha()
+            except pygame.error:
+                continue
+
+            bg = sheet.get_at((0, 0))[:3]
+            cls.background_key = bg
+            boxes = cls._extract_blobs(sheet, bg)
+            if not boxes:
+                continue
+
+            width, height = sheet.get_size()
+            car_boxes = []
+            explosion_boxes = []
+            for box in boxes:
+                min_x, min_y, max_x, max_y, area = box
+                bw = max_x - min_x + 1
+                bh = max_y - min_y + 1
+                if min_y <= int(height * 0.76) and 18 <= bw <= 120 and 10 <= bh <= 72 and area >= 120:
+                    car_boxes.append(box)
+                if min_y >= int(height * 0.54) and area >= 180:
+                    explosion_boxes.append(box)
+
+            car_boxes.sort(key=lambda box: (box[1], box[0]))
+            explosion_boxes.sort(key=lambda box: (box[0], box[1]))
+            cls.car_frames = [cls._crop_box(sheet, box) for box in car_boxes[:40]]
+            cls.explosion_frames = [cls._crop_box(sheet, box, pad=2) for box in explosion_boxes[:16]]
+            cls.loaded_path = path
+            if cls.car_frames:
+                return
+
+    @classmethod
+    def pick_car_frame(cls, index):
+        if not cls.car_frames:
+            return None
+        return cls.car_frames[index % len(cls.car_frames)]
+
+
 class SynthAudio:
     def __init__(self):
         self.enabled = True
         self.music_channel = None
         self.sfx_channel = None
         self.engine_channel = None
+        self.ai_engine_channel = None
         self.menu_loop = None
         self.race_loop = None
-        self.engine_layers = []
-        self.engine_index = -1
+        self.engine_voice_tables = []
+        self.player_engine_index = -1
+        self.player_engine_voice = 0
+        self.ai_engine_index = -1
+        self.ai_engine_voice = 0
         self.beep_low = None
         self.beep_mid = None
         self.beep_high = None
@@ -77,6 +220,8 @@ class SynthAudio:
         self.nitro = None
         self.pit = None
         self.shift = None
+        self.shift_pop = None
+        self.backfire = None
 
         try:
             if pygame.mixer.get_init() is None:
@@ -84,6 +229,7 @@ class SynthAudio:
             self.music_channel = pygame.mixer.Channel(0)
             self.sfx_channel = pygame.mixer.Channel(1)
             self.engine_channel = pygame.mixer.Channel(2)
+            self.ai_engine_channel = pygame.mixer.Channel(3)
             self._build_sounds()
         except pygame.error:
             self.enabled = False
@@ -132,22 +278,29 @@ class SynthAudio:
             buffer.append(int(32767 * v))
         return pygame.mixer.Sound(buffer=buffer.tobytes())
 
-    def _engine_layer(self, base_hz, duration=0.22):
+    def _engine_layer(self, base_hz, duration=0.22, detune=1.0, grit=0.20, pulse=0.08):
         sample_rate = 22050
         sample_count = int(sample_rate * duration)
         buffer = array("h")
         for i in range(sample_count):
             t = i / sample_rate
-            fundamental = math.sin(2.0 * math.pi * base_hz * t)
-            harmonic2 = math.sin(2.0 * math.pi * base_hz * 2.02 * t + 0.35) * 0.55
-            harmonic3 = math.sin(2.0 * math.pi * base_hz * 3.07 * t + 0.62) * 0.34
-            rasp = ((2.0 * ((t * base_hz * 1.02) % 1.0)) - 1.0) * 0.20
-            jitter = math.sin(2.0 * math.pi * (base_hz * 0.12) * t) * 0.08
-            turbulence = math.sin(2.0 * math.pi * base_hz * 6.4 * t + math.sin(t * 24.0)) * 0.08
+            hz = base_hz * detune
+            fundamental = math.sin(2.0 * math.pi * hz * t)
+            harmonic2 = math.sin(2.0 * math.pi * hz * 2.02 * t + 0.35) * 0.55
+            harmonic3 = math.sin(2.0 * math.pi * hz * 3.07 * t + 0.62) * 0.34
+            rasp = ((2.0 * ((t * hz * 1.02) % 1.0)) - 1.0) * grit
+            jitter = math.sin(2.0 * math.pi * (hz * 0.12) * t) * pulse
+            turbulence = math.sin(2.0 * math.pi * hz * 6.4 * t + math.sin(t * 24.0)) * 0.08
             value = (fundamental * 0.45 + harmonic2 + harmonic3 + rasp + jitter + turbulence) * 0.37
             value = clamp(value, -1.0, 1.0)
             buffer.append(int(32767 * value))
         return pygame.mixer.Sound(buffer=buffer.tobytes())
+
+    def _engine_voice_table(self, voice_idx, layers=18):
+        detune = 0.92 + voice_idx * 0.035
+        grit = 0.16 + (voice_idx % 4) * 0.03
+        pulse = 0.06 + (voice_idx % 3) * 0.02
+        return [self._engine_layer(42.0 + i * 8.2, detune=detune, grit=grit, pulse=pulse) for i in range(layers)]
 
     def _build_sounds(self):
         self.beep_low = self._tone(520, 0.10, 0.45, "square")
@@ -158,10 +311,12 @@ class SynthAudio:
         self.nitro = self._tone(320, 0.22, 0.45, "saw")
         self.pit = self._tone(420, 0.18, 0.30, "square")
         self.shift = self._tone(700, 0.06, 0.25, "sine")
+        self.shift_pop = self._tone(1120, 0.08, 0.26, "saw")
+        self.backfire = self._noise(0.12, 0.32)
 
         self.menu_loop = self._sequence([130, 196, 220, 175, 147, 220, 247, 196], step=0.24, volume=0.16)
         self.race_loop = self._sequence([110, 147, 131, 165, 147, 196, 165, 131], step=0.30, volume=0.11)
-        self.engine_layers = [self._engine_layer(42.0 + i * 8.2) for i in range(18)]
+        self.engine_voice_tables = [self._engine_voice_table(idx) for idx in range(8)]
 
     def play_menu_music(self):
         if self.enabled and self.menu_loop:
@@ -182,32 +337,54 @@ class SynthAudio:
         if not self.enabled or not self.engine_channel:
             return
         self.engine_channel.fadeout(100)
-        self.engine_index = -1
+        self.player_engine_index = -1
+        if self.ai_engine_channel:
+            self.ai_engine_channel.fadeout(100)
+        self.ai_engine_index = -1
 
-    def update_engine(self, rpm, throttle=False, active=True, crashed=False):
-        if not self.enabled or not self.engine_channel or not self.engine_layers:
+    def _update_engine_channel(self, channel, rpm, throttle, active, crashed, voice_id, state_prefix):
+        tables = self.engine_voice_tables
+        if not tables:
             return
+        table = tables[voice_id % len(tables)]
+        index_attr = f"{state_prefix}_engine_index"
+        voice_attr = f"{state_prefix}_engine_voice"
+        current_index = getattr(self, index_attr)
+        current_voice = getattr(self, voice_attr)
+
         if not active:
-            if self.engine_channel.get_busy():
-                self.engine_channel.fadeout(120)
-            self.engine_index = -1
+            if channel and channel.get_busy():
+                channel.fadeout(120)
+            setattr(self, index_attr, -1)
             return
 
         rpm_ratio = clamp(rpm / 9800.0, 0.0, 1.35)
-        idx = int((rpm_ratio / 1.35) * (len(self.engine_layers) - 1))
+        idx = int((rpm_ratio / 1.35) * (len(table) - 1))
         if throttle:
-            idx = min(len(self.engine_layers) - 1, idx + 1)
+            idx = min(len(table) - 1, idx + 1)
         if crashed:
             idx = max(0, idx - 4)
 
-        if idx != self.engine_index or not self.engine_channel.get_busy():
-            self.engine_channel.play(self.engine_layers[idx], loops=-1, fade_ms=80)
-            self.engine_index = idx
+        if idx != current_index or voice_id != current_voice or not channel.get_busy():
+            channel.play(table[idx], loops=-1, fade_ms=80)
+            setattr(self, index_attr, idx)
+            setattr(self, voice_attr, voice_id)
 
         volume = 0.16 + rpm_ratio * 0.58 + (0.10 if throttle else 0.0)
         if crashed:
             volume *= 0.55
-        self.engine_channel.set_volume(clamp(volume, 0.08, 0.90))
+        channel.set_volume(clamp(volume, 0.08, 0.90))
+
+    def update_engine(self, rpm, throttle=False, active=True, crashed=False, voice_id=0):
+        if not self.enabled or not self.engine_channel or not self.engine_voice_tables:
+            return
+        self._update_engine_channel(self.engine_channel, rpm, throttle, active, crashed, voice_id, "player")
+
+    def update_ai_engine(self, rpm, throttle=False, active=True, voice_id=1, proximity=1.0):
+        if not self.enabled or not self.ai_engine_channel or not self.engine_voice_tables:
+            return
+        self._update_engine_channel(self.ai_engine_channel, rpm, throttle, active, False, voice_id, "ai")
+        self.ai_engine_channel.set_volume(clamp(0.05 + proximity * 0.35, 0.05, 0.42))
 
     def play_countdown_beep(self, stage):
         if not self.enabled:
@@ -242,6 +419,15 @@ class SynthAudio:
     def play_shift(self):
         if self.enabled:
             self.sfx_channel.play(self.shift)
+
+    def play_shift_pop(self):
+        if self.enabled:
+            self.sfx_channel.play(self.shift_pop)
+
+    def play_backfire(self):
+        if not self.enabled:
+            return
+        self.sfx_channel.play(self.backfire)
 
 
 class Camera:
@@ -456,6 +642,9 @@ class Track:
         ]
         self._precompute_map_lengths()
         self.billboard_font = pygame.font.Font(None, 16)
+        self.parallax_span = 3600
+        self.city_blocks = self._generate_city_blocks()
+        self.amusement_items = self._generate_amusement_items()
 
     def _build_monaco_profile(self):
         blueprint = [
@@ -520,6 +709,26 @@ class Track:
             total += math.hypot(x2 - x1, y2 - y1)
             self.map_lengths.append(total)
         self.map_total_length = total
+
+    def _generate_city_blocks(self):
+        blocks = []
+        x = -220
+        while x < self.parallax_span + 260:
+            w = random.randint(40, 96)
+            h = random.randint(45, 130)
+            blocks.append((x, w, h, random.randint(3, 8)))
+            x += random.randint(46, 104)
+        return blocks
+
+    def _generate_amusement_items(self):
+        items = []
+        for _ in range(8):
+            items.append(("FERRIS", random.randint(-260, self.parallax_span + 260), random.randint(90, 130)))
+        for _ in range(10):
+            items.append(("COASTER", random.randint(-260, self.parallax_span + 260), random.randint(110, 150)))
+        for _ in range(10):
+            items.append(("TOWER", random.randint(-260, self.parallax_span + 260), random.randint(90, 135)))
+        return items
 
     def map_point(self, fraction):
         if self.map_total_length <= 0:
@@ -671,7 +880,53 @@ class Track:
                 return x, y, scale
         return None
 
-    def draw_background(self, screen, weather, race_time):
+    def _wrap_parallax_x(self, x):
+        span = self.parallax_span
+        wrapped = ((x + span * 0.5) % span) - span * 0.5
+        return int(wrapped + WIDTH * 0.5)
+
+    def _draw_city_layer(self, screen, shift, weather):
+        for base_x, width, height, windows in self.city_blocks:
+            px = self._wrap_parallax_x(base_x + shift)
+            y = 220 - height
+            if px < -width - 20 or px > WIDTH + 20:
+                continue
+            color = (32, 56, 92) if weather.name != "NIGHT" else (24, 36, 70)
+            pygame.draw.rect(screen, color, (px, y, width, height))
+            for w in range(windows):
+                wx = px + 6 + (w % 4) * 12
+                wy = y + 8 + (w // 4) * 14
+                if wx + 6 < px + width - 3 and wy + 5 < y + height - 3:
+                    win_color = (238, 242, 188) if weather.name == "NIGHT" else (88, 136, 196)
+                    pygame.draw.rect(screen, win_color, (wx, wy, 6, 5))
+
+    def _draw_amusement_layer(self, screen, shift, race_time):
+        for kind, base_x, base_y in self.amusement_items:
+            px = self._wrap_parallax_x(base_x + shift)
+            if kind == "FERRIS":
+                radius = 30
+                center = (px, base_y)
+                pygame.draw.circle(screen, (228, 240, 255), center, radius, 2)
+                for i in range(8):
+                    angle = race_time * 0.6 + i * (math.pi / 4)
+                    rx = int(center[0] + math.cos(angle) * radius)
+                    ry = int(center[1] + math.sin(angle) * radius)
+                    pygame.draw.line(screen, (228, 240, 255), center, (rx, ry), 1)
+                    pygame.draw.circle(screen, (255, 210, 120), (rx, ry), 3)
+                pygame.draw.line(screen, (190, 210, 226), (px - 20, base_y + 34), (px, base_y), 2)
+                pygame.draw.line(screen, (190, 210, 226), (px + 20, base_y + 34), (px, base_y), 2)
+            elif kind == "COASTER":
+                points = []
+                for step in range(-80, 81, 16):
+                    points.append((px + step, base_y + int(math.sin((step + race_time * 70) * 0.03) * 14)))
+                if len(points) >= 2:
+                    pygame.draw.lines(screen, (220, 108, 128), False, points, 2)
+            else:
+                tower_h = 44
+                pygame.draw.rect(screen, (220, 236, 252), (px - 4, base_y - tower_h, 8, tower_h))
+                pygame.draw.polygon(screen, (255, 120, 90), [(px - 10, base_y - tower_h), (px + 10, base_y - tower_h), (px, base_y - tower_h - 16)])
+
+    def draw_background(self, screen, weather, race_time, parallax_shift=0.0, speed_factor=0.0):
         if weather.name == "NIGHT":
             top = (16, 22, 52)
             bottom = (42, 70, 150)
@@ -690,6 +945,13 @@ class Track:
 
         pygame.draw.rect(screen, (48, 160, 36), (0, 220, WIDTH, HEIGHT - 220))
 
+        skyline_shift = parallax_shift * 0.22 + speed_factor * 0.018
+        amuse_shift = parallax_shift * 0.34 + speed_factor * 0.028
+        landmark_shift = parallax_shift * 0.28 + speed_factor * 0.020
+
+        self._draw_city_layer(screen, skyline_shift, weather)
+        self._draw_amusement_layer(screen, amuse_shift, race_time)
+
         mountain_color = (65, 82, 84)
         hill_points = [(0, 220)]
         for x in range(0, WIDTH + 1, 90):
@@ -698,32 +960,32 @@ class Track:
         hill_points.append((WIDTH, 220))
         pygame.draw.polygon(screen, mountain_color, hill_points)
 
-        self._draw_landmarks(screen)
+        self._draw_landmarks(screen, landmark_shift)
 
-    def _draw_landmarks(self, screen):
+    def _draw_landmarks(self, screen, shift):
         silhouette = (20, 42, 70)
         base_y = 210
 
         # Statue silhouette
-        x = 150
+        x = self._wrap_parallax_x(shift + 120)
         pygame.draw.rect(screen, silhouette, (x, base_y - 45, 18, 45))
         pygame.draw.polygon(screen, silhouette, [(x + 9, base_y - 72), (x + 2, base_y - 45), (x + 16, base_y - 45)])
         pygame.draw.rect(screen, silhouette, (x - 8, base_y - 18, 34, 18))
 
         # Leaning tower
-        x = 360
+        x = self._wrap_parallax_x(shift + 540)
         pygame.draw.polygon(screen, silhouette, [(x, base_y), (x + 20, base_y), (x + 34, base_y - 82), (x + 14, base_y - 82)])
         for i in range(5):
             pygame.draw.line(screen, (34, 58, 92), (x + 8, base_y - 12 - i * 14), (x + 30, base_y - 12 - i * 14), 2)
 
         # Eiffel tower
-        x = 600
+        x = self._wrap_parallax_x(shift + 1100)
         pygame.draw.polygon(screen, silhouette, [(x, base_y), (x + 46, base_y), (x + 23, base_y - 110)])
         pygame.draw.line(screen, (35, 58, 92), (x + 8, base_y - 36), (x + 38, base_y - 36), 3)
         pygame.draw.line(screen, (35, 58, 92), (x + 12, base_y - 68), (x + 34, base_y - 68), 2)
 
         # Christ statue
-        x = 870
+        x = self._wrap_parallax_x(shift + 1760)
         pygame.draw.rect(screen, silhouette, (x + 14, base_y - 56, 8, 56))
         pygame.draw.rect(screen, silhouette, (x - 8, base_y - 52, 52, 10))
         pygame.draw.polygon(screen, silhouette, [(x + 18, base_y - 74), (x + 11, base_y - 58), (x + 25, base_y - 58)])
@@ -878,8 +1140,12 @@ class Car:
         self.wipers_on = False
         self.headlights_on = False
         self.snow_slide = 0.0
+        self.steer_visual = 0.0
+        self.backfire_timer = 0.0
+        self.engine_voice = 0
 
         self.sprite = self._create_car_sprite(color, number, is_player)
+        self.sprite_left, self.sprite_right = self._build_sprite_variants(self.sprite)
 
     @classmethod
     def _ensure_font(cls):
@@ -888,43 +1154,54 @@ class Car:
 
     def _create_car_sprite(self, color, number, is_player):
         self._ensure_font()
-        sprite = pygame.Surface((60, 90), pygame.SRCALPHA)
-        c = color
-        dark = (max(0, c[0] - 72), max(0, c[1] - 72), max(0, c[2] - 72))
-        light = (min(255, c[0] + 46), min(255, c[1] + 46), min(255, c[2] + 46))
-        accent = (min(255, c[0] + 90), min(255, c[1] + 18), max(0, c[2] - 12))
+        frame = SpriteBank.pick_car_frame(number - 1)
+        if frame is not None:
+            sprite = pygame.transform.smoothscale(frame, (60, 90))
+            tint = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+            tint.fill((color[0], color[1], color[2], 255))
+            sprite.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            stripe = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+            stripe_color = (min(255, color[0] + 60), min(255, color[1] + 60), min(255, color[2] + 60), 180)
+            pygame.draw.rect(stripe, stripe_color, (24, 8, 12, 70))
+            sprite.blit(stripe, (0, 0))
+        else:
+            sprite = pygame.Surface((60, 90), pygame.SRCALPHA)
+            c = color
+            dark = (max(0, c[0] - 72), max(0, c[1] - 72), max(0, c[2] - 72))
+            light = (min(255, c[0] + 46), min(255, c[1] + 46), min(255, c[2] + 46))
+            accent = (min(255, c[0] + 90), min(255, c[1] + 18), max(0, c[2] - 12))
 
-        # Wheels and tire blocks
-        wheel = (22, 22, 24)
-        pygame.draw.rect(sprite, wheel, (2, 12, 12, 26))
-        pygame.draw.rect(sprite, wheel, (46, 12, 12, 26))
-        pygame.draw.rect(sprite, wheel, (4, 50, 10, 22))
-        pygame.draw.rect(sprite, wheel, (46, 50, 10, 22))
+            # Wheels and tire blocks
+            wheel = (22, 22, 24)
+            pygame.draw.rect(sprite, wheel, (2, 12, 12, 26))
+            pygame.draw.rect(sprite, wheel, (46, 12, 12, 26))
+            pygame.draw.rect(sprite, wheel, (4, 50, 10, 22))
+            pygame.draw.rect(sprite, wheel, (46, 50, 10, 22))
 
-        # Rear wing and endplates
-        pygame.draw.rect(sprite, dark, (11, 6, 38, 8))
-        pygame.draw.rect(sprite, accent, (9, 8, 42, 5))
-        pygame.draw.rect(sprite, dark, (7, 5, 4, 11))
-        pygame.draw.rect(sprite, dark, (49, 5, 4, 11))
+            # Rear wing and endplates
+            pygame.draw.rect(sprite, dark, (11, 6, 38, 8))
+            pygame.draw.rect(sprite, accent, (9, 8, 42, 5))
+            pygame.draw.rect(sprite, dark, (7, 5, 4, 11))
+            pygame.draw.rect(sprite, dark, (49, 5, 4, 11))
 
-        # Main body and sidepods
-        pygame.draw.polygon(sprite, dark, [(18, 14), (42, 14), (38, 60), (22, 60)])
-        pygame.draw.polygon(sprite, c, [(20, 16), (40, 16), (36, 58), (24, 58)])
-        pygame.draw.polygon(sprite, light, [(22, 18), (38, 18), (34, 34), (26, 34)])
-        pygame.draw.rect(sprite, dark, (13, 34, 10, 16))
-        pygame.draw.rect(sprite, dark, (37, 34, 10, 16))
-        pygame.draw.rect(sprite, accent, (14, 36, 8, 10))
-        pygame.draw.rect(sprite, accent, (38, 36, 8, 10))
+            # Main body and sidepods
+            pygame.draw.polygon(sprite, dark, [(18, 14), (42, 14), (38, 60), (22, 60)])
+            pygame.draw.polygon(sprite, c, [(20, 16), (40, 16), (36, 58), (24, 58)])
+            pygame.draw.polygon(sprite, light, [(22, 18), (38, 18), (34, 34), (26, 34)])
+            pygame.draw.rect(sprite, dark, (13, 34, 10, 16))
+            pygame.draw.rect(sprite, dark, (37, 34, 10, 16))
+            pygame.draw.rect(sprite, accent, (14, 36, 8, 10))
+            pygame.draw.rect(sprite, accent, (38, 36, 8, 10))
 
-        # Nose cone and front wing
-        pygame.draw.polygon(sprite, c, [(27, 56), (33, 56), (35, 80), (25, 80)])
-        pygame.draw.polygon(sprite, light, [(28, 58), (32, 58), (33, 76), (27, 76)])
-        pygame.draw.rect(sprite, dark, (10, 78, 40, 5))
-        pygame.draw.rect(sprite, accent, (9, 82, 42, 4))
+            # Nose cone and front wing
+            pygame.draw.polygon(sprite, c, [(27, 56), (33, 56), (35, 80), (25, 80)])
+            pygame.draw.polygon(sprite, light, [(28, 58), (32, 58), (33, 76), (27, 76)])
+            pygame.draw.rect(sprite, dark, (10, 78, 40, 5))
+            pygame.draw.rect(sprite, accent, (9, 82, 42, 4))
 
-        # Cockpit / driver canopy
-        pygame.draw.rect(sprite, (20, 92, 192), (24, 30, 12, 15))
-        pygame.draw.rect(sprite, (114, 206, 255), (25, 31, 10, 6))
+            # Cockpit / driver canopy
+            pygame.draw.rect(sprite, (20, 92, 192), (24, 30, 12, 15))
+            pygame.draw.rect(sprite, (114, 206, 255), (25, 31, 10, 6))
 
         # Number on engine cover
         number_text = self.number_font.render(str(number), True, (250, 250, 250))
@@ -933,6 +1210,11 @@ class Car:
         if is_player:
             pygame.draw.rect(sprite, (250, 240, 90), (23, 22, 14, 4))
         return sprite
+
+    def _build_sprite_variants(self, base_sprite):
+        left = pygame.transform.rotozoom(base_sprite, 9, 1.0)
+        right = pygame.transform.rotozoom(base_sprite, -9, 1.0)
+        return left, right
 
     @property
     def progress(self):
@@ -966,6 +1248,8 @@ class Car:
         self.wipers_on = False
         self.headlights_on = False
         self.snow_slide = 0.0
+        self.steer_visual = 0.0
+        self.backfire_timer = 0.0
 
     def _advance_track_progress(self, distance_step, track_length, race_elapsed):
         if distance_step <= 0:
@@ -1011,14 +1295,21 @@ class Car:
         if self.gear >= 7:
             return "max"
         rough_shift = False
+        perfect_shift = False
         if self.rpm > self.redline * 1.10:
             self.shift_penalty_timer = random.uniform(2.6, 3.4)
             rough_shift = True
         elif self.redline * 0.88 <= self.rpm <= self.redline * 1.01:
             self.perfect_shift_boost = max(self.perfect_shift_boost, 1.25)
+            perfect_shift = True
         self.gear += 1
         self.rpm *= 0.66
-        return "overrev" if rough_shift else "ok"
+        self.backfire_timer = 0.18 if rough_shift else 0.08
+        if rough_shift:
+            return "overrev"
+        if perfect_shift:
+            return "perfect"
+        return "ok"
 
     def shift_down(self):
         if self.transmission_mode != "manual":
@@ -1031,6 +1322,7 @@ class Car:
         self.rpm *= 1.12
         if self.rpm > self.redline * 1.16:
             self.shift_penalty_timer = max(self.shift_penalty_timer, 1.0)
+        self.backfire_timer = max(self.backfire_timer, 0.05)
         return "ok"
 
     def grant_nitro(self):
@@ -1074,9 +1366,11 @@ class Car:
         self.rpm += (target_rpm - self.rpm) * dt * response
         self.rpm = clamp(self.rpm, 850.0, 11200.0)
 
-    def update_player(self, dt, track, weather, throttle, brake, steer, allow_drive, race_elapsed):
+    def update_player(self, dt, track, weather, throttle, brake, steer, allow_drive, race_elapsed, traction_control=True):
         if self.finished:
             return
+
+        self.backfire_timer = max(0.0, self.backfire_timer - dt)
 
         if self.crash_timer > 0:
             self.crash_timer -= dt
@@ -1119,6 +1413,8 @@ class Car:
             gear_cap = speed_limits[self.gear]
             cap_ratio = clamp(1.0 - (self.speed / max(gear_cap, 0.01)), 0.32, 1.12)
             accel_force = gear_accel[self.gear] * cap_ratio * traction
+            if traction_control:
+                accel_force *= 1.0 - max(0.0, 1.0 - traction) * 0.45
             if self.speed > gear_cap:
                 accel_force *= 0.48
             self.speed += accel_force * dt
@@ -1143,11 +1439,18 @@ class Car:
         if allow_drive:
             speed_ratio = clamp(self.speed / max(max_speed, 0.01), 0.0, 1.0)
             steer_force = weather.steer_response * dt * (0.92 - speed_ratio * 0.42)
+            if traction_control:
+                steer_force *= 0.86 + traction * 0.18
             self.lane += steer * steer_force
             if weather.name == "SNOW":
                 self.snow_slide += steer * dt * 0.78
                 self.snow_slide *= max(0.0, 1.0 - 1.4 * dt)
                 self.lane += self.snow_slide
+            if not traction_control and effective_throttle:
+                slip = max(0.0, 1.0 - traction)
+                self.lane += math.sin(race_elapsed * 19.0 + self.speed) * slip * dt * 0.30
+
+        self.steer_visual += (steer - self.steer_visual) * min(1.0, dt * 10.0)
 
         self.lane = clamp(self.lane, -1.48, 1.48)
         self._update_rpm(dt, effective_throttle)
@@ -1163,18 +1466,27 @@ class Car:
         distance_step = self.speed * dt if allow_drive else 0.0
         self._advance_track_progress(distance_step, track.length, race_elapsed)
 
-    def draw(self, screen, x, y, scale, show_flames=False):
+    def draw(self, screen, x, y, scale, show_flames=False, show_backfire=False):
         if scale <= 0:
             return
-        w = max(8, int(self.sprite.get_width() * scale))
-        h = max(8, int(self.sprite.get_height() * scale))
-        scaled = pygame.transform.smoothscale(self.sprite, (w, h))
+        sprite = self.sprite
+        if self.steer_visual < -0.24:
+            sprite = self.sprite_left
+        elif self.steer_visual > 0.24:
+            sprite = self.sprite_right
+
+        w = max(8, int(sprite.get_width() * scale))
+        h = max(8, int(sprite.get_height() * scale))
+        scaled = pygame.transform.smoothscale(sprite, (w, h))
         screen.blit(scaled, (int(x - w * 0.5), int(y - h * 0.9)))
-        if show_flames:
+        if show_flames or show_backfire:
             flame_w = max(4, int(8 * scale))
             flame_h = max(5, int(13 * scale))
             fx = int(x)
             fy = int(y + h * 0.08)
+            if show_backfire and not show_flames:
+                flame_w = max(3, int(5 * scale))
+                flame_h = max(3, int(7 * scale))
             pygame.draw.polygon(
                 screen,
                 (255, 122, 28),
@@ -1195,6 +1507,7 @@ class AIDriver(Car):
         self.preferred_lane = random.uniform(-0.65, 0.65)
         self.wobble_phase = random.uniform(0, 6.28)
         self.finish_logged = False
+        self.engine_voice = random.randint(1, 7)
 
     def update_ai(self, dt, track, weather, racers, race_elapsed):
         if self.finished:
@@ -1223,6 +1536,7 @@ class AIDriver(Car):
         lane_error = target_lane - self.lane
         lane_step = clamp(lane_error, -1.0, 1.0) * dt * (0.45 + self.speed / 140.0) * weather.steer_response
         self.lane += lane_step
+        self.steer_visual += (clamp(lane_error * 2.5, -1.0, 1.0) - self.steer_visual) * min(1.0, dt * 6.0)
         self.lane = clamp(self.lane, -1.38, 1.38)
 
         base_speed = 70.0 + self.skill * 27.0
@@ -1326,9 +1640,12 @@ class CollisionSystem:
                 if ai.finished:
                     continue
                 delta = signed_track_delta(ai.distance, player.distance, track.length)
-                if abs(delta) < 4.8 and abs(ai.lane - player.lane) < 0.19:
-                    impact = abs(ai.speed - player.speed)
-                    if impact > 34.0 or abs(player.lane) > 1.18:
+                lane_gap = abs(ai.lane - player.lane)
+                if abs(delta) < 4.6 and lane_gap < 0.21:
+                    relative_speed = abs(ai.speed - player.speed)
+                    impact = relative_speed + player.speed * 0.32
+                    severe_contact = player.speed > 18.0 and (impact > 23.0 or abs(delta) < 1.9)
+                    if severe_contact or abs(player.lane) > 1.18:
                         crashed = player.start_crash() or crashed
                     else:
                         shove = 0.16 if ai.lane >= player.lane else -0.16
@@ -1337,7 +1654,7 @@ class CollisionSystem:
                         player.speed = max(0.0, player.speed - 7.0)
                         ai.speed = max(0.0, ai.speed - 4.0)
 
-            if player.speed > 26.0:
+            if player.speed > 14.0:
                 for sign_distance, sign_side in track.sign_positions:
                     delta = signed_track_delta(sign_distance, player.distance, track.length)
                     if 0.0 < delta < 3.0 and sign_side * player.lane > 1.22:
@@ -1386,6 +1703,7 @@ class HUD:
         speed_text = self.font_large.render(f"{speed_kmh:03d} km/h", True, (168, 244, 246))
         timer_text = self.font_large.render(f"TIME {int(max(game.race_timer, 0)):02d}", True, timer_color)
         gear_label = "A" if player.transmission_mode == "automatic" else str(player.gear)
+        tc_label = "ON" if game.traction_control_enabled else "OFF"
 
         screen.blit(lap_text, (hud_panel.x + 14, hud_panel.y + 10))
         screen.blit(pos_text, (hud_panel.x + 226, hud_panel.y + 10))
@@ -1394,6 +1712,9 @@ class HUD:
 
         gear_text = self.font_medium.render(f"GEAR {gear_label}", True, (255, 255, 255))
         screen.blit(gear_text, (hud_panel.x + 14, hud_panel.y + 95))
+        tc_color = (102, 232, 138) if game.traction_control_enabled else (255, 148, 102)
+        tc_text = self.font_small.render(f"TC {tc_label} (T)", True, tc_color)
+        screen.blit(tc_text, (hud_panel.x + 14, hud_panel.y + 140))
 
         if player.transmission_mode == "manual":
             rpm_ratio = clamp(player.rpm / player.redline, 0.0, 1.25)
@@ -1478,6 +1799,7 @@ class PolePositionRacerGame:
         self.clock = pygame.time.Clock()
         self.running = True
 
+        SpriteBank.load_optional_sheet()
         self.audio = SynthAudio()
         self.track = Track()
         self.weather = Weather()
@@ -1488,6 +1810,7 @@ class PolePositionRacerGame:
 
         self.transmission_setting = "manual"
         self.default_camera_mode = "CHASE"
+        self.traction_control_enabled = True
 
         self.player = Car("PLAYER", (236, 90, 50), 20, transmission_mode=self.transmission_setting, is_player=True)
         self.ai_cars = []
@@ -1528,6 +1851,8 @@ class PolePositionRacerGame:
         self.player.lane = 0.0
         self.player.color = palette[0]
         self.player.sprite = self.player._create_car_sprite(self.player.color, self.player.number, True)
+        self.player.sprite_left, self.player.sprite_right = self.player._build_sprite_variants(self.player.sprite)
+        self.player.engine_voice = 0
 
         for idx in range(19):
             skill = random.uniform(0.45, 1.00)
@@ -1674,7 +1999,8 @@ class PolePositionRacerGame:
                 self._add_message("GO GO GO!", 2.0)
         if self.countdown_timer <= 0:
             self.state = "race"
-        self.audio.update_engine(self.player.rpm, throttle=False, active=True, crashed=False)
+        self.audio.update_engine(self.player.rpm, throttle=False, active=True, crashed=False, voice_id=self.player.engine_voice)
+        self.audio.update_ai_engine(0.0, active=False)
 
     def _process_race_keydowns(self, events):
         for event in events:
@@ -1694,8 +2020,13 @@ class PolePositionRacerGame:
                 outcome = self.player.shift_up()
                 if outcome == "ok":
                     self.audio.play_shift()
-                elif outcome == "overrev":
+                    self.audio.play_shift_pop()
+                elif outcome == "perfect":
                     self.audio.play_shift()
+                    self.audio.play_shift_pop()
+                    self._add_message("PERFECT SHIFT BOOST!", 1.2)
+                elif outcome == "overrev":
+                    self.audio.play_backfire()
                     self._add_message("ROUGH SHIFT! POWER LOSS", 1.4)
                 elif outcome == "locked":
                     self._add_message("OVER-REV! SHIFT LOCK", 1.8)
@@ -1703,12 +2034,17 @@ class PolePositionRacerGame:
                 outcome = self.player.shift_down()
                 if outcome == "ok":
                     self.audio.play_shift()
+                    self.audio.play_shift_pop()
             elif event.key == pygame.K_h and self.weather.requires_headlights:
                 self.player.headlights_on = not self.player.headlights_on
                 if self.player.headlights_on:
                     self._add_message("HEADLIGHTS ON", 1.4)
                 else:
                     self._add_message("HEADLIGHTS OFF", 1.4)
+            elif event.key == pygame.K_t:
+                self.traction_control_enabled = not self.traction_control_enabled
+                tc_state = "ON" if self.traction_control_enabled else "OFF"
+                self._add_message(f"TRACTION CONTROL {tc_state}", 1.4)
             elif event.key == pygame.K_1 and self.weather.requires_wipers:
                 self.player.wipers_on = not self.player.wipers_on
                 if self.player.wipers_on:
@@ -1737,7 +2073,17 @@ class PolePositionRacerGame:
             self._add_message(pit_message, 2.0)
 
         allow_drive = not self.pit_system.active and not self.player.eliminated
-        self.player.update_player(dt, self.track, self.weather, throttle, brake, steer, allow_drive, self.race_elapsed)
+        self.player.update_player(
+            dt,
+            self.track,
+            self.weather,
+            throttle,
+            brake,
+            steer,
+            allow_drive,
+            self.race_elapsed,
+            traction_control=self.traction_control_enabled,
+        )
 
         racers_for_ai = [self.player] + self.ai_cars
         for ai in self.ai_cars:
@@ -1795,7 +2141,23 @@ class PolePositionRacerGame:
             throttle=throttle_audio,
             active=engine_active,
             crashed=self.player.crash_timer > 0,
+            voice_id=self.player.engine_voice,
         )
+
+        nearby_ai = None
+        nearest_delta = float("inf")
+        for ai in self.ai_cars:
+            if ai.finished:
+                continue
+            delta = abs(signed_track_delta(ai.distance, self.player.distance, self.track.length))
+            if delta < nearest_delta:
+                nearest_delta = delta
+                nearby_ai = ai
+        if nearby_ai and nearest_delta < 95.0:
+            proximity = 1.0 - clamp(nearest_delta / 95.0, 0.0, 1.0)
+            self.audio.update_ai_engine(nearby_ai.rpm, throttle=True, active=True, voice_id=nearby_ai.engine_voice, proximity=proximity)
+        else:
+            self.audio.update_ai_engine(0.0, active=False)
 
         if self.player.finished:
             self._enter_post_race(dnf=False)
@@ -1814,7 +2176,8 @@ class PolePositionRacerGame:
 
         self._compute_positions()
         leader = sorted(self.ai_cars, key=lambda car: car.progress, reverse=True)[0]
-        self.audio.update_engine(leader.rpm, throttle=True, active=True, crashed=False)
+        self.audio.update_engine(leader.rpm, throttle=True, active=True, crashed=False, voice_id=leader.engine_voice)
+        self.audio.update_ai_engine(0.0, active=False)
         self.spectator_timer -= dt
         done = self.spectator_timer <= 0
         for event in events:
@@ -1854,9 +2217,11 @@ class PolePositionRacerGame:
         if self.state == "intro":
             self._update_intro(dt, events)
             self.audio.update_engine(0.0, active=False)
+            self.audio.update_ai_engine(0.0, active=False)
         elif self.state == "menu":
             self._update_menu(events)
             self.audio.update_engine(0.0, active=False)
+            self.audio.update_ai_engine(0.0, active=False)
         elif self.state == "countdown":
             self._update_countdown(dt)
             self._update_messages(dt)
@@ -1868,9 +2233,11 @@ class PolePositionRacerGame:
         elif self.state == "name_entry":
             self._update_name_entry(events)
             self.audio.update_engine(0.0, active=False)
+            self.audio.update_ai_engine(0.0, active=False)
         elif self.state == "post_race":
             self._update_post_race(events)
             self.audio.update_engine(0.0, active=False)
+            self.audio.update_ai_engine(0.0, active=False)
 
     def _draw_intro(self):
         self.screen.fill((8, 12, 20))
@@ -1901,7 +2268,7 @@ class PolePositionRacerGame:
 
     def _draw_menu(self):
         self.screen.fill((14, 20, 32))
-        self.track.draw_background(self.screen, self.weather, self.race_elapsed)
+        self.track.draw_background(self.screen, self.weather, self.race_elapsed, parallax_shift=0.0, speed_factor=0.0)
 
         panel = pygame.Rect(WIDTH // 2 - 300, 96, 600, 518)
         pygame.draw.rect(self.screen, (10, 14, 24, 210), panel, border_radius=10)
@@ -1932,10 +2299,21 @@ class PolePositionRacerGame:
             "INSERT - NITRO (MANUAL ONLY)",
             "SPACE - PIT STOP ENTRY (MANDATORY LAP 2)",
             "C - CAMERA TOGGLE   H - HEADLIGHTS   1 - WIPERS",
+            "T - TRACTION CONTROL TOGGLE",
         ]
         for i, line in enumerate(controls):
             txt = small_font.render(line, True, (188, 212, 242))
             self.screen.blit(txt, (panel.x + 40, panel.y + 378 + i * 28))
+
+        tc_state = "ON" if self.traction_control_enabled else "OFF"
+        tc_color = (114, 246, 150) if self.traction_control_enabled else (255, 160, 120)
+        tc_info = small_font.render(f"TRACTION CONTROL DEFAULT: {tc_state}", True, tc_color)
+        self.screen.blit(tc_info, (panel.x + 40, panel.y + 548))
+
+        sprite_state = "LOADED" if SpriteBank.loaded_path else "PROCEDURAL"
+        sprite_color = (130, 236, 255) if SpriteBank.loaded_path else (196, 214, 232)
+        sprite_info = small_font.render(f"SPRITESHEET: {sprite_state}", True, sprite_color)
+        self.screen.blit(sprite_info, (panel.x + 352, panel.y + 548))
 
     def _draw_countdown_lights(self):
         center_x = WIDTH // 2
@@ -1963,6 +2341,18 @@ class PolePositionRacerGame:
         self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 140))
 
     def _draw_explosion(self, x, y, timer):
+        if SpriteBank.explosion_frames:
+            progress = 1.0 - clamp(timer / 5.0, 0.0, 1.0)
+            frame_idx = int(progress * (len(SpriteBank.explosion_frames) - 1))
+            frame_idx = clamp(frame_idx, 0, len(SpriteBank.explosion_frames) - 1)
+            frame = SpriteBank.explosion_frames[int(frame_idx)]
+            scale = 1.0 + progress * 2.0
+            w = max(24, int(frame.get_width() * scale))
+            h = max(24, int(frame.get_height() * scale))
+            img = pygame.transform.smoothscale(frame, (w, h))
+            self.screen.blit(img, (int(x - w * 0.5), int(y - h * 0.5)))
+            return
+
         progress = 1.0 - clamp(timer / 5.0, 0.0, 1.0)
         radius = int(38 + progress * 120)
         pygame.draw.circle(self.screen, (220, 28, 20), (int(x), int(y)), radius)
@@ -1976,7 +2366,15 @@ class PolePositionRacerGame:
             pygame.draw.circle(self.screen, (255, 84, 40), (px, py), max(2, int(radius * 0.08)))
 
     def _draw_race(self, anchor_car):
-        self.track.draw_background(self.screen, self.weather, self.race_elapsed)
+        curve_now = self.track.curvature_at(anchor_car.distance + 20.0)
+        parallax_shift = anchor_car.lane * 360.0 + curve_now * 520.0
+        self.track.draw_background(
+            self.screen,
+            self.weather,
+            self.race_elapsed,
+            parallax_shift=parallax_shift,
+            speed_factor=anchor_car.speed * 3.6,
+        )
         bands = self.track.build_projection(self.camera.mode, anchor_car.distance, anchor_car.lane, self.weather)
         self.track.draw_road(self.screen, bands)
         self.track.draw_roadside(self.screen, bands, self.camera.mode, anchor_car.distance)
@@ -1999,7 +2397,7 @@ class PolePositionRacerGame:
 
         drawables.sort(reverse=True, key=lambda item: item[0])
         for _, racer, x, y, scale in drawables:
-            racer.draw(self.screen, x, y, scale, show_flames=False)
+            racer.draw(self.screen, x, y, scale, show_flames=False, show_backfire=racer.backfire_timer > 0)
 
         if anchor_car is self.player and self.camera.mode != "BUMPER":
             player_x = WIDTH // 2
@@ -2008,7 +2406,14 @@ class PolePositionRacerGame:
             else:
                 player_x = WIDTH // 2 - int(self.player.lane * 90)
             player_y = HEIGHT - 56
-            self.player.draw(self.screen, player_x, player_y, 1.85, show_flames=self.player.nitro_timer > 0)
+            self.player.draw(
+                self.screen,
+                player_x,
+                player_y,
+                1.85,
+                show_flames=self.player.nitro_timer > 0,
+                show_backfire=self.player.backfire_timer > 0,
+            )
             if self.player.crash_timer > 0:
                 self._draw_explosion(player_x, player_y - 40, self.player.crash_timer)
 
