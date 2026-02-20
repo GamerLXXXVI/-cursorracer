@@ -617,6 +617,7 @@ class Track:
     def __init__(self):
         self.length = TRACK_LENGTH_M
         self.checkpoint_distance = CHECKPOINT_DISTANCE_M
+        self.curve_strength = 0.56
         self.segments = self._build_monaco_profile()
         self.segment_starts = []
         self.loop_offset = 0.0
@@ -704,7 +705,16 @@ class Track:
 
         total = sum(length for length, _ in blueprint)
         scale = self.length / total
-        return [TrackSegment(length * scale, curve) for length, curve in blueprint]
+        tuned_segments = []
+        for idx, (length, curve) in enumerate(blueprint):
+            extra = math.sin(idx * 0.72) * 0.06
+            if abs(curve) < 0.08:
+                tuned_curve = curve + extra
+            else:
+                tuned_curve = curve * 1.42 + extra * 0.5
+            tuned_curve = clamp(tuned_curve, -0.92, 0.92)
+            tuned_segments.append(TrackSegment(length * scale, tuned_curve))
+        return tuned_segments
 
     def _precompute_offsets(self):
         self.segment_starts.clear()
@@ -712,7 +722,7 @@ class Track:
         cumulative_offset = 0.0
         for segment in self.segments:
             self.segment_starts.append((cumulative_length, cumulative_offset, segment.length, segment.curve))
-            cumulative_offset += segment.curve * segment.length * 0.33
+            cumulative_offset += segment.curve * segment.length * self.curve_strength
             cumulative_length += segment.length
         self.loop_offset = cumulative_offset
 
@@ -816,22 +826,23 @@ class Track:
             if distance <= start:
                 offset += base_offset
             else:
-                offset += base_offset + curve * (distance - start) * 0.33
+                offset += base_offset + curve * (distance - start) * self.curve_strength
             return offset
         return offset + self.segment_starts[-1][1]
 
-    def build_projection(self, camera_mode, anchor_distance, anchor_lane, weather):
+    def build_projection(self, camera_mode, anchor_distance, anchor_lane, weather, anchor_speed):
         reverse = camera_mode == "REAR"
         direction = -1.0 if reverse else 1.0
 
-        horizon = 170 if camera_mode != "BUMPER" else 210
-        lookahead = weather.visibility_distance
+        speed_ratio = clamp(anchor_speed / 120.0, 0.0, 1.0)
+        horizon = 212 if camera_mode != "BUMPER" else 236
+        lookahead = weather.visibility_distance * (0.74 + speed_ratio * 0.14)
         if camera_mode == "BUMPER":
-            lookahead *= 0.88
-        if reverse:
             lookahead *= 0.80
+        if reverse:
+            lookahead *= 0.76
 
-        rows = 120
+        rows = 132
         bands = []
         anchor_offset = self.offset_at(anchor_distance)
         for i in range(rows):
@@ -841,17 +852,17 @@ class Track:
             ahead_far = lookahead * ((1.0 - t_far) ** 2)
             ahead_near = lookahead * ((1.0 - t_near) ** 2)
 
-            y_far = horizon + (t_far ** 1.46) * (HEIGHT - horizon)
-            y_near = horizon + (t_near ** 1.46) * (HEIGHT - horizon)
+            y_far = horizon + (t_far ** 1.36) * (HEIGHT - horizon)
+            y_near = horizon + (t_near ** 1.36) * (HEIGHT - horizon)
 
-            half_far = lerp(52, 530, t_far)
-            half_near = lerp(52, 530, t_near)
+            half_far = lerp(68, 580, t_far)
+            half_near = lerp(68, 580, t_near)
 
             distance_far = anchor_distance + direction * ahead_far
             distance_near = anchor_distance + direction * ahead_near
 
-            shift_far = (self.offset_at(distance_far) - anchor_offset) * 1.24
-            shift_near = (self.offset_at(distance_near) - anchor_offset) * 1.24
+            shift_far = (self.offset_at(distance_far) - anchor_offset) * 2.24
+            shift_near = (self.offset_at(distance_near) - anchor_offset) * 2.24
 
             lane_push_far = anchor_lane * half_far * 0.94
             lane_push_near = anchor_lane * half_near * 0.94
@@ -1298,13 +1309,13 @@ class Car:
 
     def _gear_speed_limits_kmh(self):
         if self.transmission_mode == "automatic":
-            return [0.0, 66.0, 118.0, 176.0, 242.0, 308.0, 372.0, 430.0]
-        return [0.0, 70.0, 126.0, 190.0, 258.0, 326.0, 392.0, 448.0]
+            return [0.0, 78.0, 142.0, 206.0, 274.0, 340.0, 404.0, 458.0]
+        return [0.0, 84.0, 150.0, 220.0, 292.0, 364.0, 432.0, 490.0]
 
     def _gear_accel_profile(self):
         if self.transmission_mode == "automatic":
-            return [0.0, 38.0, 35.0, 32.0, 29.0, 26.0, 23.0, 21.0]
-        return [0.0, 41.0, 38.0, 35.0, 32.0, 29.0, 26.0, 23.0]
+            return [0.0, 46.0, 42.0, 38.0, 34.0, 30.0, 27.0, 24.0]
+        return [0.0, 49.0, 45.0, 41.0, 37.0, 33.0, 30.0, 27.0]
 
     def shift_up(self):
         if self.transmission_mode != "manual":
@@ -1444,7 +1455,7 @@ class Car:
             brake_force = 52.0 + self.speed * 0.10
             self.speed -= brake_force * dt
 
-        drag = 1.2 + self.speed * 0.014 + (self.speed * self.speed) * 0.00035
+        drag = 1.0 + self.speed * 0.011 + (self.speed * self.speed) * 0.00030
         if not effective_throttle:
             drag *= 1.12
         self.speed -= drag * dt
@@ -1539,38 +1550,62 @@ class AIDriver(Car):
                 self.lane = 0.0
             return
 
-        curve_now = track.curvature_at(self.distance + 20.0)
-        curve_ahead = track.curvature_at(self.distance + 55.0)
+        curve_now = track.curvature_at(self.distance + 25.0)
+        curve_ahead = track.curvature_at(self.distance + 82.0)
 
-        target_lane = clamp(-curve_ahead * 0.95 + self.preferred_lane * 0.7 + math.sin(race_elapsed * 0.9 + self.wobble_phase) * 0.12, -0.95, 0.95)
+        target_lane = -curve_ahead * 1.12 + self.preferred_lane * 0.66 + math.sin(race_elapsed * 0.9 + self.wobble_phase) * 0.10
+        target_lane = clamp(target_lane, -0.92, 0.92)
+
+        closest_ahead = None
+        closest_gap = float("inf")
         for other in racers:
-            if other is self or other.finished:
+            if other is self or other.finished or other.crash_timer > 0:
                 continue
             delta = signed_track_delta(other.distance, self.distance, track.length)
-            if 0.0 < delta < 21.0 and abs(other.lane - self.lane) < 0.22:
-                target_lane += 0.55 if self.lane <= other.lane else -0.55
-                break
+            if delta <= 0.0:
+                continue
+            lane_gap = abs(other.lane - self.lane)
+            if lane_gap < 0.70 and delta < closest_gap:
+                closest_gap = delta
+                closest_ahead = other
+            if 0.0 < delta < 30.0 and lane_gap < 0.28:
+                target_lane += 0.66 if self.lane <= other.lane else -0.66
 
-        target_lane = clamp(target_lane, -1.1, 1.1)
-        lane_error = target_lane - self.lane
-        lane_step = clamp(lane_error, -1.0, 1.0) * dt * (0.45 + self.speed / 140.0) * weather.steer_response
-        self.lane += lane_step
-        self.steer_visual += (clamp(lane_error * 2.5, -1.0, 1.0) - self.steer_visual) * min(1.0, dt * 6.0)
-        self.lane = clamp(self.lane, -1.38, 1.38)
-
-        base_speed = 66.0 + self.skill * 22.0
-        curve_penalty = 1.0 - min(0.44, abs(curve_now) * 0.60 + abs(curve_ahead) * 0.35)
+        base_speed = 64.0 + self.skill * 24.0
+        curve_penalty = 1.0 - min(0.48, abs(curve_now) * 0.64 + abs(curve_ahead) * 0.40)
         target_speed = base_speed * curve_penalty * weather.ai_speed_factor
         if abs(self.lane) > 1.05:
-            target_speed *= 0.75
+            target_speed *= 0.78
 
+        safe_gap = 8.0 + self.speed * 0.22
+        if closest_ahead:
+            if closest_gap < safe_gap * 2.4:
+                blend = clamp((safe_gap * 2.4 - closest_gap) / max(1.0, safe_gap * 2.4), 0.0, 1.0)
+                desired_follow_speed = closest_ahead.speed * (0.90 + self.aggression * 0.09)
+                target_speed = min(target_speed, lerp(target_speed, desired_follow_speed, blend))
+            if closest_gap < safe_gap:
+                brake_ratio = clamp((safe_gap - closest_gap) / max(1.0, safe_gap), 0.0, 1.0)
+                target_speed = min(target_speed, max(14.0, closest_ahead.speed - 4.0 * brake_ratio))
+                target_lane += 0.74 if self.lane <= closest_ahead.lane else -0.74
+
+        target_lane = clamp(target_lane, -1.16, 1.16)
+        lane_error = target_lane - self.lane
+        lane_step = clamp(lane_error, -1.0, 1.0) * dt * (0.56 + self.speed / 122.0) * weather.steer_response
+        self.lane += lane_step
+        self.steer_visual += (clamp(lane_error * 2.2, -1.0, 1.0) - self.steer_visual) * min(1.0, dt * 6.0)
+        self.lane = clamp(self.lane, -1.34, 1.34)
+
+        target_speed = clamp(target_speed, 16.0, 100.0)
         if self.speed < target_speed:
-            self.speed += (12.5 + self.aggression * 6.5) * dt
+            self.speed += (13.4 + self.aggression * 5.8) * dt
         else:
-            self.speed -= (10.2 + (1.0 - self.aggression) * 5.0) * dt
+            self.speed -= (12.4 + (1.0 - self.aggression) * 6.2) * dt
 
-        self.speed -= (4.4 + self.speed * 0.042) * dt
-        self.speed = clamp(self.speed, 20.0, 92.0)
+        if closest_ahead and closest_gap < safe_gap:
+            self.speed -= (16.0 * (safe_gap - closest_gap) / max(1.0, safe_gap)) * dt
+
+        self.speed -= (3.6 + self.speed * 0.032 + self.speed * self.speed * 0.00022) * dt
+        self.speed = clamp(self.speed, 18.0, 95.0)
 
         self.rpm = 1200.0 + self.speed * (1.5 + self.gear * 0.2) * 40.0
         self._auto_shift()
@@ -1686,14 +1721,15 @@ class CollisionSystem:
                 if first.finished or second.finished:
                     continue
                 delta = signed_track_delta(second.distance, first.distance, track.length)
-                if abs(delta) < 3.4 and abs(second.lane - first.lane) < 0.14:
-                    impact = abs(second.speed - first.speed) + max(second.speed, first.speed) * 0.22
-                    if impact > 22.0:
-                        first.start_crash()
-                        second.start_crash()
-                    first.speed = max(18.0, first.speed - 2.5)
-                    second.speed = max(18.0, second.speed - 2.5)
-                    push = 0.07 if first.lane <= second.lane else -0.07
+                lane_gap = abs(second.lane - first.lane)
+                if abs(delta) < 2.4 and lane_gap < 0.12:
+                    relative_speed = abs(second.speed - first.speed)
+                    if relative_speed > 12.0 and max(second.speed, first.speed) > 60.0 and abs(delta) < 1.2:
+                        trailing = first if delta > 0 else second
+                        trailing.start_crash()
+                    first.speed = max(18.0, first.speed - 1.8)
+                    second.speed = max(18.0, second.speed - 1.8)
+                    push = 0.11 if first.lane <= second.lane else -0.11
                     first.lane -= push
                     second.lane += push
         return crashed
@@ -1896,13 +1932,16 @@ class PolePositionRacerGame:
         self.player.sprite_left, self.player.sprite_right = self.player._build_sprite_variants(self.player.sprite)
         self.player.engine_voice = 0
 
+        grid_lanes = [-0.58, -0.18, 0.22, 0.60]
+        distance_spacing = 14.8
+        start_buffer = 36.0
         for idx in range(19):
             skill = random.uniform(0.45, 1.00)
             aggression = random.uniform(0.30, 1.00)
             ai = AIDriver(f"AI-{idx + 1:02d}", palette[idx + 1], idx + 1, skill, aggression)
-            ai.distance = 26.0 + idx * 9.2
+            ai.distance = start_buffer + idx * distance_spacing
             ai.total_distance = ai.distance
-            ai.lane = ((idx % 4) - 1.5) * 0.26 + random.uniform(-0.05, 0.05)
+            ai.lane = grid_lanes[idx % len(grid_lanes)] + random.uniform(-0.04, 0.04)
             self.ai_cars.append(ai)
 
     def _load_leaderboard(self):
@@ -2397,7 +2436,7 @@ class PolePositionRacerGame:
         ]
         for i, line in enumerate(controls):
             txt = small_font.render(line, True, (188, 212, 242))
-            self.screen.blit(txt, (panel.x + 40, panel.y + 356 + i * 28))
+            self.screen.blit(txt, (panel.x + 40, panel.y + 344 + i * 24))
 
         tc_state = "ON" if self.traction_control_enabled else "OFF"
         tc_color = (114, 246, 150) if self.traction_control_enabled else (255, 160, 120)
@@ -2469,7 +2508,7 @@ class PolePositionRacerGame:
             parallax_shift=parallax_shift,
             speed_factor=anchor_car.speed * 3.6,
         )
-        bands = self.track.build_projection(self.camera.mode, anchor_car.distance, anchor_car.lane, self.weather)
+        bands = self.track.build_projection(self.camera.mode, anchor_car.distance, anchor_car.lane, self.weather, anchor_car.speed)
         self.track.draw_road(self.screen, bands)
         self.track.draw_roadside(self.screen, bands, self.camera.mode, anchor_car.distance)
         self.track.draw_nitro_pickup(self.screen, bands, self.camera.mode, anchor_car.distance, self.player.lap)
@@ -2501,12 +2540,12 @@ class PolePositionRacerGame:
                 player_x = WIDTH // 2 + int(self.player.lane * 90)
             else:
                 player_x = WIDTH // 2 - int(self.player.lane * 90)
-            player_y = HEIGHT - 42
+            player_y = HEIGHT - 8
             self.player.draw(
                 self.screen,
                 player_x,
                 player_y,
-                1.38,
+                1.88,
                 show_flames=self.player.nitro_timer > 0,
                 show_backfire=self.player.backfire_timer > 0,
             )
