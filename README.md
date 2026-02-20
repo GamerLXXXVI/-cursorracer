@@ -53,6 +53,19 @@ python3 -m pip install -r requirements.txt
 python3 main.py
 ```
 
+## Included Sprite-Sheet Assets
+
+The repository now includes ready-to-use sprite sheets in both root and `assets/` locations:
+
+- `spritesheet.png`
+- `car_spritesheet.png`
+- `pole_position_spritesheet.png`
+- `assets/spritesheet.png`
+- `assets/car_spritesheet.png`
+- `assets/pole_position_spritesheet.png`
+
+You do not need to create folders manually; the game auto-detects these files.
+
 ## Controls
 
 ### Driving
