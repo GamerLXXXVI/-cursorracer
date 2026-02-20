@@ -1029,7 +1029,7 @@ class Track:
             segment_index = band["segment_index"]
             stripe = (segment_index // 2) % 2
             grass = (58, 168, 30) if stripe else (74, 182, 46)
-            road_color = (74, 74, 74) if stripe else (66, 66, 66)
+            road_color = (78, 82, 92) if stripe else (70, 74, 84)
             rumble = (232, 46, 42) if stripe else (236, 236, 236)
 
             pygame.draw.rect(screen, grass, (0, y1, WIDTH, y2 - y1))
@@ -1052,13 +1052,17 @@ class Track:
             pygame.draw.line(screen, (172, 178, 188), (int(c1 - h1 - rumble_w1 - 3), y1), (int(c2 - h2 - rumble_w2 - 3), y2), 2)
             pygame.draw.line(screen, (172, 178, 188), (int(c1 + h1 + rumble_w1 + 3), y1), (int(c2 + h2 + rumble_w2 + 3), y2), 2)
 
+            # Pole Position style edge stripes (yellow left, white right)
+            pygame.draw.line(screen, (242, 222, 58), (int(c1 - h1 + 3), y1), (int(c2 - h2 + 3), y2), 2)
+            pygame.draw.line(screen, (244, 244, 244), (int(c1 + h1 - 3), y1), (int(c2 + h2 - 3), y2), 2)
+
             # Lane markers
             marker_cond = (segment_index + int(y1 / 6)) % 2 == 0
             if marker_cond:
-                for lane_div in (1 / 3, 2 / 3):
-                    x1 = lerp(c1 - h1, c1 + h1, lane_div)
-                    x2 = lerp(c2 - h2, c2 + h2, lane_div)
-                    pygame.draw.line(screen, (240, 240, 240), (int(x1), y1), (int(x2), y2), 2)
+                lane_div = 0.5
+                x1 = lerp(c1 - h1, c1 + h1, lane_div)
+                x2 = lerp(c2 - h2, c2 + h2, lane_div)
+                pygame.draw.line(screen, (240, 240, 240), (int(x1), y1), (int(x2), y2), 2)
 
     def draw_roadside(self, screen, bands, camera_mode, anchor_distance):
         reverse = camera_mode == "REAR"
@@ -1174,67 +1178,107 @@ class Track:
         rx, ry, rscale = right
         scale = max(0.10, min(cscale, lscale, rscale))
 
-        post_h = max(10, int(124 * scale))
-        post_w = max(3, int(11 * scale))
-        beam_h = max(5, int(24 * scale))
-        board_w = max(50, int(abs(rx - lx) * 0.70))
-        board_h = max(12, int(42 * scale))
+        post_h = max(12, int(132 * scale))
+        post_w = max(4, int(12 * scale))
+        beam_h = max(6, int(26 * scale))
+        board_w = max(56, int(abs(rx - lx) * 0.56))
+        board_h = max(12, int(38 * scale))
         top_y = int(min(ly, ry) - post_h)
 
-        post_color = (46, 166, 232)
-        post_shadow = (28, 98, 156)
-        beam_color = (44, 162, 228)
-        board_bg = (246, 210, 62)
-        board_border = (196, 46, 42)
+        post_color = (34, 188, 255)
+        post_dark = (14, 110, 174)
+        beam_color = (32, 176, 244)
+        beam_dark = (18, 118, 188)
+        board_bg = (248, 214, 58)
+        board_border = (198, 48, 42)
+        label_color = (194, 34, 32)
 
-        # posts
-        pygame.draw.rect(screen, post_shadow, (int(lx - post_w // 2), int(top_y), post_w, int(ly - top_y)))
-        pygame.draw.rect(screen, post_color, (int(lx - post_w // 2 + 1), int(top_y + 1), max(1, post_w - 2), max(1, int(ly - top_y) - 2)))
-        pygame.draw.rect(screen, post_shadow, (int(rx - post_w // 2), int(top_y), post_w, int(ry - top_y)))
-        pygame.draw.rect(screen, post_color, (int(rx - post_w // 2 + 1), int(top_y + 1), max(1, post_w - 2), max(1, int(ry - top_y) - 2)))
+        # scaffold posts
+        left_post = pygame.Rect(int(lx - post_w // 2), int(top_y), post_w, int(ly - top_y))
+        right_post = pygame.Rect(int(rx - post_w // 2), int(top_y), post_w, int(ry - top_y))
+        for post in (left_post, right_post):
+            pygame.draw.rect(screen, post_dark, post)
+            pygame.draw.rect(screen, post_color, post.inflate(-2, -2))
+            step = max(7, int(18 * scale))
+            for sy in range(post.y + 3, post.bottom - 3, step):
+                pygame.draw.line(screen, beam_dark, (post.x - max(2, post_w // 2), sy), (post.right + max(2, post_w // 2), sy + step // 2), 1)
+                pygame.draw.line(screen, beam_dark, (post.right + max(2, post_w // 2), sy), (post.x - max(2, post_w // 2), sy + step // 2), 1)
 
-        # truss beam
-        beam_rect = pygame.Rect(int(lx), top_y, int(max(4, rx - lx)), beam_h)
-        pygame.draw.rect(screen, beam_color, beam_rect)
-        for i in range(0, beam_rect.w, max(8, int(20 * scale))):
-            pygame.draw.line(screen, (28, 104, 170), (beam_rect.x + i, beam_rect.y), (beam_rect.x + i, beam_rect.bottom), 1)
+        # horizontal truss beam
+        beam_rect = pygame.Rect(int(lx - post_w // 2), top_y, int(max(6, rx - lx + post_w)), beam_h)
+        pygame.draw.rect(screen, beam_dark, beam_rect)
+        pygame.draw.rect(screen, beam_color, beam_rect.inflate(-2, -2))
+        truss_step = max(8, int(20 * scale))
+        for x in range(beam_rect.x + 2, beam_rect.right - 3, truss_step):
+            pygame.draw.line(screen, beam_dark, (x, beam_rect.y + 1), (x + truss_step // 2, beam_rect.bottom - 2), 1)
+            pygame.draw.line(screen, beam_dark, (x + truss_step // 2, beam_rect.y + 1), (x, beam_rect.bottom - 2), 1)
 
-        # board and checker corners
-        board_rect = pygame.Rect(int(cx - board_w // 2), int(top_y - board_h * 0.70), board_w, board_h)
-        pygame.draw.rect(screen, board_bg, board_rect)
-        pygame.draw.rect(screen, board_border, board_rect, 2)
-
-        check_size = max(2, int(7 * scale))
-        check_w = max(8, int(board_w * 0.16))
+        # label board + checker blocks integrated into beam
+        board_rect = pygame.Rect(int(cx - board_w // 2), int(top_y - board_h * 0.62), board_w, board_h)
+        check_w = max(10, int(board_w * 0.21))
         left_check = pygame.Rect(board_rect.x - check_w - 2, board_rect.y, check_w, board_rect.h)
         right_check = pygame.Rect(board_rect.right + 2, board_rect.y, check_w, board_rect.h)
         for check_rect in (left_check, right_check):
-            pygame.draw.rect(screen, (232, 232, 232), check_rect)
-            for y in range(check_rect.y, check_rect.bottom, check_size):
-                for x in range(check_rect.x, check_rect.right, check_size):
-                    if ((x - check_rect.x) // check_size + (y - check_rect.y) // check_size) % 2 == 0:
-                        pygame.draw.rect(screen, (24, 24, 24), (x, y, check_size, check_size))
+            pygame.draw.rect(screen, (236, 236, 236), check_rect)
+            csz = max(2, int(6 * scale))
+            for y in range(check_rect.y, check_rect.bottom, csz):
+                for x in range(check_rect.x, check_rect.right, csz):
+                    if ((x - check_rect.x) // csz + (y - check_rect.y) // csz) % 2 == 0:
+                        pygame.draw.rect(screen, (18, 18, 18), (x, y, csz, csz))
+            pygame.draw.rect(screen, board_border, check_rect, 2)
 
-        text_surface = self.gate_font.render(label, True, (194, 32, 36))
-        text_w = max(20, int(text_surface.get_width() * scale * 0.55))
-        text_h = max(10, int(text_surface.get_height() * scale * 0.55))
+        pygame.draw.rect(screen, board_bg, board_rect)
+        pygame.draw.rect(screen, board_border, board_rect, 2)
+
+        # red side boxes with X pattern
+        side_box_w = max(8, int(18 * scale))
+        side_box_h = board_rect.h
+        side_left = pygame.Rect(left_check.x - side_box_w - 2, board_rect.y, side_box_w, side_box_h)
+        side_right = pygame.Rect(right_check.right + 2, board_rect.y, side_box_w, side_box_h)
+        for side in (side_left, side_right):
+            pygame.draw.rect(screen, (214, 52, 46), side)
+            pygame.draw.rect(screen, (138, 28, 26), side, 2)
+            pygame.draw.line(screen, (250, 232, 210), side.topleft, side.bottomright, 2)
+            pygame.draw.line(screen, (250, 232, 210), side.topright, side.bottomleft, 2)
+
+        text_surface = self.gate_font.render(label, True, label_color)
+        raw_text_w = max(24, int(text_surface.get_width() * scale * 0.53))
+        raw_text_h = max(10, int(text_surface.get_height() * scale * 0.53))
+        max_text_w = max(20, board_rect.w - 6)
+        if raw_text_w > max_text_w:
+            text_h = max(8, int(raw_text_h * (max_text_w / raw_text_w)))
+            text_w = max_text_w
+        else:
+            text_w = raw_text_w
+            text_h = raw_text_h
         text_scaled = pygame.transform.smoothscale(text_surface, (text_w, text_h))
         screen.blit(text_scaled, (board_rect.centerx - text_w // 2, board_rect.centery - text_h // 2))
 
         # race lights only for START gate
         if label == "START":
-            light_r = max(2, int(6 * scale))
-            ly_base = int(cy - 10 * scale)
-            for i, color in enumerate(((196, 36, 36), (212, 182, 36), (36, 196, 72))):
-                pygame.draw.circle(screen, color, (int(cx - 16 * scale + i * 16 * scale), ly_base), light_r)
+            light_r = max(2, int(5 * scale))
+            ly_base = int(beam_rect.bottom + 8 * scale)
+            lx_base = int(left_post.centerx + 26 * scale)
+            light_colors = [(196, 34, 34), (196, 34, 34), (196, 34, 34), (196, 34, 34), (44, 180, 58)]
+            for i, color in enumerate(light_colors):
+                pygame.draw.circle(screen, color, (lx_base + int(i * 11 * scale), ly_base), light_r)
+                pygame.draw.circle(screen, (26, 26, 26), (lx_base + int(i * 11 * scale), ly_base), light_r, 1)
 
     def draw_event_gates(self, screen, bands, camera_mode, anchor_distance, start_line_distance):
         reverse = camera_mode == "REAR"
         gate_items = [(start_line_distance, "START")]
 
         checkpoint_count = max(1, int(self.length // self.checkpoint_distance))
-        for idx in range(1, checkpoint_count + 1):
-            gate_items.append(((idx * self.checkpoint_distance) % self.length, "CHECKPOINT"))
+        checkpoint_distances = [((idx * self.checkpoint_distance) % self.length) for idx in range(1, checkpoint_count + 1)]
+        ahead_checkpoints = []
+        for cp_distance in checkpoint_distances:
+            delta = signed_track_delta(cp_distance, anchor_distance, self.length)
+            view_delta = -delta if reverse else delta
+            if view_delta > 0:
+                ahead_checkpoints.append((view_delta, cp_distance))
+        if ahead_checkpoints:
+            nearest_cp = min(ahead_checkpoints, key=lambda item: item[0])[1]
+            gate_items.append((nearest_cp, "CHECKPOINT"))
 
         visible = []
         for distance, label in gate_items:
