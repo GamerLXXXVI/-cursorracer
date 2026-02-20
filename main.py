@@ -659,6 +659,7 @@ class Track:
         ]
         self._precompute_map_lengths()
         self.billboard_font = pygame.font.Font(None, 16)
+        self.grid_font = pygame.font.Font(None, 24)
         self.parallax_span = 3600
         self.city_blocks = self._generate_city_blocks()
         self.amusement_items = self._generate_amusement_items()
@@ -835,12 +836,12 @@ class Track:
         direction = -1.0 if reverse else 1.0
 
         speed_ratio = clamp(anchor_speed / 120.0, 0.0, 1.0)
-        horizon = 212 if camera_mode != "BUMPER" else 236
-        lookahead = weather.visibility_distance * (0.74 + speed_ratio * 0.14)
+        horizon = 232 if camera_mode != "BUMPER" else 248
+        lookahead = weather.visibility_distance * (0.66 + speed_ratio * 0.12)
         if camera_mode == "BUMPER":
-            lookahead *= 0.80
-        if reverse:
             lookahead *= 0.76
+        if reverse:
+            lookahead *= 0.72
 
         rows = 132
         bands = []
@@ -852,17 +853,17 @@ class Track:
             ahead_far = lookahead * ((1.0 - t_far) ** 2)
             ahead_near = lookahead * ((1.0 - t_near) ** 2)
 
-            y_far = horizon + (t_far ** 1.36) * (HEIGHT - horizon)
-            y_near = horizon + (t_near ** 1.36) * (HEIGHT - horizon)
+            y_far = horizon + (t_far ** 1.32) * (HEIGHT - horizon)
+            y_near = horizon + (t_near ** 1.32) * (HEIGHT - horizon)
 
-            half_far = lerp(68, 580, t_far)
-            half_near = lerp(68, 580, t_near)
+            half_far = lerp(58, 450, t_far)
+            half_near = lerp(58, 450, t_near)
 
             distance_far = anchor_distance + direction * ahead_far
             distance_near = anchor_distance + direction * ahead_near
 
-            shift_far = (self.offset_at(distance_far) - anchor_offset) * 2.24
-            shift_near = (self.offset_at(distance_near) - anchor_offset) * 2.24
+            shift_far = (self.offset_at(distance_far) - anchor_offset) * 2.05
+            shift_near = (self.offset_at(distance_near) - anchor_offset) * 2.05
 
             lane_push_far = anchor_lane * half_far * 0.94
             lane_push_near = anchor_lane * half_near * 0.94
@@ -1124,6 +1125,42 @@ class Track:
         pygame.draw.circle(screen, (44, 126, 236), (int(x), int(y - 8 * scale)), radius)
         pygame.draw.circle(screen, glow_color, (int(x), int(y - 8 * scale)), max(2, radius // 2))
 
+    def draw_start_grid(self, screen, bands, camera_mode, anchor_distance, start_line_distance, slots):
+        reverse = camera_mode == "REAR"
+        line_delta = signed_track_delta(start_line_distance, anchor_distance, self.length)
+        line_view_delta = -line_delta if reverse else line_delta
+        if 4.0 < line_view_delta < bands[0]["ahead_far"]:
+            left = self.project_from_bands(line_view_delta, -0.98, bands)
+            right = self.project_from_bands(line_view_delta, 0.98, bands)
+            if left and right:
+                x1, y1, _ = left
+                x2, y2, _ = right
+                pygame.draw.line(screen, (240, 240, 240), (int(x1), int(y1)), (int(x2), int(y2)), 4)
+                check_w = max(6, int(abs(x2 - x1) / 18))
+                for i in range(10):
+                    cx = int(lerp(x1, x2, i / 9 if 9 else 0))
+                    color = (240, 240, 240) if i % 2 == 0 else (24, 24, 24)
+                    pygame.draw.rect(screen, color, (cx - check_w // 2, int(y1 - 6), check_w, 6))
+
+        for slot in slots:
+            slot_delta = signed_track_delta(slot["distance"], anchor_distance, self.length)
+            slot_view_delta = -slot_delta if reverse else slot_delta
+            if not (5.0 < slot_view_delta < bands[0]["ahead_far"]):
+                continue
+            projection = self.project_from_bands(slot_view_delta, slot["lane"], bands)
+            if projection is None:
+                continue
+            x, y, scale = projection
+            cell_w = max(5, int(24 * scale))
+            cell_h = max(4, int(11 * scale))
+            rect = pygame.Rect(int(x - cell_w * 0.5), int(y - cell_h * 0.42), cell_w, cell_h)
+            pygame.draw.rect(screen, (210, 214, 226), rect, 1)
+            num_surface = self.grid_font.render(str(slot["pos"]), True, (226, 232, 244))
+            text_w = max(8, int(num_surface.get_width() * scale * 0.60))
+            text_h = max(6, int(num_surface.get_height() * scale * 0.60))
+            scaled_num = pygame.transform.smoothscale(num_surface, (text_w, text_h))
+            screen.blit(scaled_num, (int(x - text_w // 2), int(y - text_h // 2)))
+
 
 class Car:
     number_font = None
@@ -1309,13 +1346,13 @@ class Car:
 
     def _gear_speed_limits_kmh(self):
         if self.transmission_mode == "automatic":
-            return [0.0, 78.0, 142.0, 206.0, 274.0, 340.0, 404.0, 458.0]
-        return [0.0, 84.0, 150.0, 220.0, 292.0, 364.0, 432.0, 490.0]
+            return [0.0, 84.0, 154.0, 224.0, 294.0, 362.0, 426.0, 480.0]
+        return [0.0, 90.0, 164.0, 238.0, 314.0, 390.0, 462.0, 520.0]
 
     def _gear_accel_profile(self):
         if self.transmission_mode == "automatic":
-            return [0.0, 46.0, 42.0, 38.0, 34.0, 30.0, 27.0, 24.0]
-        return [0.0, 49.0, 45.0, 41.0, 37.0, 33.0, 30.0, 27.0]
+            return [0.0, 50.0, 46.0, 42.0, 37.0, 33.0, 29.0, 25.0]
+        return [0.0, 54.0, 50.0, 46.0, 41.0, 36.0, 32.0, 28.0]
 
     def shift_up(self):
         if self.transmission_mode != "manual":
@@ -1455,7 +1492,7 @@ class Car:
             brake_force = 52.0 + self.speed * 0.10
             self.speed -= brake_force * dt
 
-        drag = 1.0 + self.speed * 0.011 + (self.speed * self.speed) * 0.00030
+        drag = 0.96 + self.speed * 0.010 + (self.speed * self.speed) * 0.00028
         if not effective_throttle:
             drag *= 1.12
         self.speed -= drag * dt
@@ -1553,25 +1590,33 @@ class AIDriver(Car):
         curve_now = track.curvature_at(self.distance + 25.0)
         curve_ahead = track.curvature_at(self.distance + 82.0)
 
-        target_lane = -curve_ahead * 1.12 + self.preferred_lane * 0.66 + math.sin(race_elapsed * 0.9 + self.wobble_phase) * 0.10
-        target_lane = clamp(target_lane, -0.92, 0.92)
+        target_lane = -curve_ahead * 0.88 + self.preferred_lane * 0.88 + math.sin(race_elapsed * 0.9 + self.wobble_phase) * 0.08
+        target_lane = clamp(target_lane, -1.02, 1.02)
 
         closest_ahead = None
         closest_gap = float("inf")
+        ahead_left_blocked = False
+        ahead_right_blocked = False
         for other in racers:
             if other is self or other.finished or other.crash_timer > 0:
                 continue
             delta = signed_track_delta(other.distance, self.distance, track.length)
             if delta <= 0.0:
                 continue
-            lane_gap = abs(other.lane - self.lane)
-            if lane_gap < 0.70 and delta < closest_gap:
+            lane_diff = other.lane - self.lane
+            lane_gap = abs(lane_diff)
+            if lane_gap < 0.80 and delta < closest_gap:
                 closest_gap = delta
                 closest_ahead = other
-            if 0.0 < delta < 30.0 and lane_gap < 0.28:
-                target_lane += 0.66 if self.lane <= other.lane else -0.66
+            if 0.0 < delta < 26.0:
+                if -0.55 < lane_diff < -0.06:
+                    ahead_left_blocked = True
+                if 0.06 < lane_diff < 0.55:
+                    ahead_right_blocked = True
+                if lane_gap < 0.24:
+                    target_lane += 0.74 if lane_diff >= 0 else -0.74
 
-        base_speed = 64.0 + self.skill * 24.0
+        base_speed = 70.0 + self.skill * 24.0
         curve_penalty = 1.0 - min(0.48, abs(curve_now) * 0.64 + abs(curve_ahead) * 0.40)
         target_speed = base_speed * curve_penalty * weather.ai_speed_factor
         if abs(self.lane) > 1.05:
@@ -1586,7 +1631,12 @@ class AIDriver(Car):
             if closest_gap < safe_gap:
                 brake_ratio = clamp((safe_gap - closest_gap) / max(1.0, safe_gap), 0.0, 1.0)
                 target_speed = min(target_speed, max(14.0, closest_ahead.speed - 4.0 * brake_ratio))
-                target_lane += 0.74 if self.lane <= closest_ahead.lane else -0.74
+                if not ahead_left_blocked and (ahead_right_blocked or self.lane > 0.05):
+                    target_lane -= 0.92
+                elif not ahead_right_blocked:
+                    target_lane += 0.92
+                else:
+                    target_lane += 0.74 if self.lane <= closest_ahead.lane else -0.74
 
         target_lane = clamp(target_lane, -1.16, 1.16)
         lane_error = target_lane - self.lane
@@ -1595,7 +1645,7 @@ class AIDriver(Car):
         self.steer_visual += (clamp(lane_error * 2.2, -1.0, 1.0) - self.steer_visual) * min(1.0, dt * 6.0)
         self.lane = clamp(self.lane, -1.34, 1.34)
 
-        target_speed = clamp(target_speed, 16.0, 100.0)
+        target_speed = clamp(target_speed, 18.0, 104.0)
         if self.speed < target_speed:
             self.speed += (13.4 + self.aggression * 5.8) * dt
         else:
@@ -1604,8 +1654,8 @@ class AIDriver(Car):
         if closest_ahead and closest_gap < safe_gap:
             self.speed -= (16.0 * (safe_gap - closest_gap) / max(1.0, safe_gap)) * dt
 
-        self.speed -= (3.6 + self.speed * 0.032 + self.speed * self.speed * 0.00022) * dt
-        self.speed = clamp(self.speed, 18.0, 95.0)
+        self.speed -= (3.2 + self.speed * 0.028 + self.speed * self.speed * 0.00020) * dt
+        self.speed = clamp(self.speed, 18.0, 98.0)
 
         self.rpm = 1200.0 + self.speed * (1.5 + self.gear * 0.2) * 40.0
         self._auto_shift()
@@ -1873,6 +1923,8 @@ class PolePositionRacerGame:
 
         self.player = Car("PLAYER", (236, 90, 50), 20, transmission_mode=self.transmission_setting, is_player=True)
         self.ai_cars = []
+        self.start_line_distance = 430.0
+        self.start_grid_slots = []
 
         self.state = "intro"
         self.intro_timer = 0.0
@@ -1918,30 +1970,43 @@ class PolePositionRacerGame:
         if self.logger:
             self.logger.info(message)
 
+    def _build_start_grid_slots(self):
+        slots = []
+        row_spacing = 20.5
+        lane_left = -0.32
+        lane_right = 0.32
+        for idx in range(TOTAL_RACERS):
+            row = idx // 2
+            lane = lane_left if idx % 2 == 0 else lane_right
+            distance = self.start_line_distance - 16.0 - row * row_spacing
+            slots.append({"pos": idx + 1, "distance": distance, "lane": lane})
+        return slots
+
     def _spawn_ai_grid(self):
         self.ai_cars.clear()
         palette = generate_unique_palette(TOTAL_RACERS)
+        self.start_grid_slots = self._build_start_grid_slots()
 
         self.player.reset_for_race()
         self.player.transmission_mode = self.transmission_setting
-        self.player.distance = 0.0
+        player_slot = next(slot for slot in self.start_grid_slots if slot["pos"] == 20)
+        self.player.distance = player_slot["distance"]
         self.player.total_distance = 0.0
-        self.player.lane = 0.0
+        self.player.lane = player_slot["lane"]
         self.player.color = palette[0]
         self.player.sprite = self.player._create_car_sprite(self.player.color, self.player.number, True)
         self.player.sprite_left, self.player.sprite_right = self.player._build_sprite_variants(self.player.sprite)
         self.player.engine_voice = 0
 
-        grid_lanes = [-0.58, -0.18, 0.22, 0.60]
-        distance_spacing = 14.8
-        start_buffer = 36.0
         for idx in range(19):
             skill = random.uniform(0.45, 1.00)
             aggression = random.uniform(0.30, 1.00)
             ai = AIDriver(f"AI-{idx + 1:02d}", palette[idx + 1], idx + 1, skill, aggression)
-            ai.distance = start_buffer + idx * distance_spacing
+            slot = self.start_grid_slots[idx]
+            ai.distance = slot["distance"]
             ai.total_distance = ai.distance
-            ai.lane = grid_lanes[idx % len(grid_lanes)] + random.uniform(-0.04, 0.04)
+            ai.lane = slot["lane"] + random.uniform(-0.015, 0.015)
+            ai.preferred_lane = clamp(ai.lane + random.uniform(-0.16, 0.16), -0.95, 0.95)
             self.ai_cars.append(ai)
 
     def _load_leaderboard(self):
@@ -2510,6 +2575,14 @@ class PolePositionRacerGame:
         )
         bands = self.track.build_projection(self.camera.mode, anchor_car.distance, anchor_car.lane, self.weather, anchor_car.speed)
         self.track.draw_road(self.screen, bands)
+        self.track.draw_start_grid(
+            self.screen,
+            bands,
+            self.camera.mode,
+            anchor_car.distance,
+            self.start_line_distance,
+            self.start_grid_slots,
+        )
         self.track.draw_roadside(self.screen, bands, self.camera.mode, anchor_car.distance)
         self.track.draw_nitro_pickup(self.screen, bands, self.camera.mode, anchor_car.distance, self.player.lap)
 
@@ -2536,16 +2609,12 @@ class PolePositionRacerGame:
 
         if anchor_car is self.player and self.camera.mode != "BUMPER":
             player_x = WIDTH // 2
-            if self.camera.mode == "REAR":
-                player_x = WIDTH // 2 + int(self.player.lane * 90)
-            else:
-                player_x = WIDTH // 2 - int(self.player.lane * 90)
-            player_y = HEIGHT - 8
+            player_y = HEIGHT + 2
             self.player.draw(
                 self.screen,
                 player_x,
                 player_y,
-                1.88,
+                1.96,
                 show_flames=self.player.nitro_timer > 0,
                 show_backfire=self.player.backfire_timer > 0,
             )
