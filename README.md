@@ -15,6 +15,7 @@ A retro arcade racing game inspired by classic 1980s sprite-scaling racers, buil
 - Turbo blow-off / backfire pops on gear shifts
 - Individual AI engine voice variation
 - Nitro pickup/activation (manual mode only)
+- Pause/resume race with frozen frame capture (`P`)
 - Mandatory pit stop on lap 2 with animated sequence
 - Random weather each race:
   - Clear
@@ -71,6 +72,7 @@ python3 main.py
 - `Space` - Enter pit lane (lap 2 mandatory pit window)
 - `C` - Toggle camera (chase / rear / bumper)
 - `T` - Toggle traction control assist
+- `P` - Pause/resume current race scene
 - `1` - Toggle wipers during rain/thunderstorm
 - `H` - Toggle headlights during night weather
 - `Esc` - Back to menu / quit from menu
@@ -78,4 +80,5 @@ python3 main.py
 ## Notes
 
 - This project uses procedural visuals and synthesized retro-style tones (no external sprite/audio packs).
+- Runtime telemetry and gameplay events are logged to `race_debug.log`.
 - The game targets smooth 60 FPS on typical desktop hardware.
