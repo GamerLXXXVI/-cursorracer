@@ -1,0 +1,217 @@
+{
+  "sprite_set": "player_racer",
+  "camera_view": "behind_vehicle",
+  "godot_notes": {
+    "body_and_wheels_are_separate": true,
+    "wheel_anchor_positions_are_center_points": true,
+    "all_png_backgrounds_transparent": true
+  },
+  "body_frame_size": {
+    "w": 128,
+    "h": 128
+  },
+  "directions": [
+    "far_left",
+    "hard_left",
+    "left",
+    "slight_left",
+    "straight",
+    "slight_right",
+    "right",
+    "hard_right",
+    "far_right"
+  ],
+  "wheel_profiles_by_direction": {
+    "far_left": "extreme_turn",
+    "hard_left": "turn",
+    "left": "turn",
+    "slight_left": "straight",
+    "straight": "straight",
+    "slight_right": "straight",
+    "right": "turn",
+    "hard_right": "turn",
+    "far_right": "extreme_turn"
+  },
+  "wheel_anchors": {
+    "far_left": {
+      "front_left": [
+        39,
+        56
+      ],
+      "front_right": [
+        65,
+        56
+      ],
+      "rear_left": [
+        46,
+        90
+      ],
+      "rear_right": [
+        80,
+        90
+      ]
+    },
+    "hard_left": {
+      "front_left": [
+        40,
+        56
+      ],
+      "front_right": [
+        70,
+        56
+      ],
+      "rear_left": [
+        44,
+        90
+      ],
+      "rear_right": [
+        82,
+        90
+      ]
+    },
+    "left": {
+      "front_left": [
+        41,
+        56
+      ],
+      "front_right": [
+        75,
+        56
+      ],
+      "rear_left": [
+        42,
+        90
+      ],
+      "rear_right": [
+        84,
+        90
+      ]
+    },
+    "slight_left": {
+      "front_left": [
+        41,
+        56
+      ],
+      "front_right": [
+        81,
+        56
+      ],
+      "rear_left": [
+        39,
+        90
+      ],
+      "rear_right": [
+        87,
+        90
+      ]
+    },
+    "straight": {
+      "front_left": [
+        42,
+        56
+      ],
+      "front_right": [
+        86,
+        56
+      ],
+      "rear_left": [
+        38,
+        90
+      ],
+      "rear_right": [
+        90,
+        90
+      ]
+    },
+    "slight_right": {
+      "front_left": [
+        44,
+        56
+      ],
+      "front_right": [
+        88,
+        56
+      ],
+      "rear_left": [
+        40,
+        90
+      ],
+      "rear_right": [
+        88,
+        90
+      ]
+    },
+    "right": {
+      "front_left": [
+        48,
+        56
+      ],
+      "front_right": [
+        90,
+        56
+      ],
+      "rear_left": [
+        41,
+        90
+      ],
+      "rear_right": [
+        87,
+        90
+      ]
+    },
+    "hard_right": {
+      "front_left": [
+        51,
+        56
+      ],
+      "front_right": [
+        93,
+        56
+      ],
+      "rear_left": [
+        41,
+        90
+      ],
+      "rear_right": [
+        87,
+        90
+      ]
+    },
+    "far_right": {
+      "front_left": [
+        54,
+        56
+      ],
+      "front_right": [
+        96,
+        56
+      ],
+      "rear_left": [
+        43,
+        90
+      ],
+      "rear_right": [
+        85,
+        90
+      ]
+    }
+  },
+  "wheel_animation": {
+    "frame_size": {
+      "w": 36,
+      "h": 36
+    },
+    "frames": 16,
+    "recommended_fps": 24
+  },
+  "files": {
+    "body_sheet": "assets/sprites/player_racer/body/player_racer_body_sheet.png",
+    "underbody_sheet": "assets/sprites/player_racer/body/player_racer_underbody_sheet.png",
+    "wheel_sheets": {
+      "straight": "assets/sprites/player_racer/wheels/player_racer_wheel_spin_straight.png",
+      "turn": "assets/sprites/player_racer/wheels/player_racer_wheel_spin_turn.png",
+      "extreme_turn": "assets/sprites/player_racer/wheels/player_racer_wheel_spin_extreme_turn.png"
+    },
+    "preview": "assets/sprites/player_racer/preview/player_racer_composite_preview.png"
+  }
+}
