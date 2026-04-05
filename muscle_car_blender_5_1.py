@@ -1247,11 +1247,12 @@ def build_interior(ctx):
 
     # Door cards + armrest + handle.
     for side in (-1.0, 1.0):
-        x_outer = side * 0.68
-        x_inner = side * 0.62
+        # Push side panels outward so they sit near the inner door skin.
+        x_outer = side * 0.90
+        x_inner = side * 0.82
         add_box(f"DoorCard_{'R' if side > 0 else 'L'}", (x_inner, -0.72, 0.30), (x_outer, 0.54, 0.68), interior, material=mats["interior"], smooth=True)
-        add_box(f"DoorArmrest_{'R' if side > 0 else 'L'}", (side * 0.62, -0.24, 0.46), (side * 0.68, 0.16, 0.54), interior, material=mats["dash"], smooth=True)
-        add_box(f"DoorHandle_{'R' if side > 0 else 'L'}", (side * 0.635, 0.22, 0.50), (side * 0.665, 0.30, 0.53), interior, material=mats["chrome"], smooth=True)
+        add_box(f"DoorArmrest_{'R' if side > 0 else 'L'}", (side * 0.82, -0.24, 0.46), (side * 0.90, 0.16, 0.54), interior, material=mats["dash"], smooth=True)
+        add_box(f"DoorHandle_{'R' if side > 0 else 'L'}", (side * 0.84, 0.22, 0.50), (side * 0.88, 0.30, 0.53), interior, material=mats["chrome"], smooth=True)
 
     # Roll cage with 9 tube segments.
     cage_segments = [
