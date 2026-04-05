@@ -1222,6 +1222,18 @@ def build_interior(ctx):
         create_roll_cage_tube(name, p0, p1, radius=0.018, collection=interior, material=mats["carbon"])
 
 
+def orient_vehicle(ctx):
+    # User-facing orientation fix: rotate the whole car 180 deg in top view.
+    scene = ctx["scene"]
+    root_col = ctx["collections"]["Root"]
+    anchor = bpy.data.objects.new("MuscleCar_Root", None)
+    scene.collection.objects.link(anchor)
+    for obj in root_col.all_objects:
+        obj.parent = anchor
+    anchor.location = (0.0, 0.0, 0.0)
+    anchor.rotation_euler = (0.0, 0.0, math.pi)
+
+
 def setup_scene():
     print("Setting up scene...")
     scene = bpy.context.scene
@@ -1312,6 +1324,7 @@ def main():
         build_exhausts(ctx)
         build_wheels(ctx)
         build_interior(ctx)
+        orient_vehicle(ctx)
         print("=== Build complete: MuscleCar_v4 generated successfully ===")
     except Exception:
         print("ERROR during build:")
