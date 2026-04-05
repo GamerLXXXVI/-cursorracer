@@ -1098,11 +1098,12 @@ def create_gauge_disc(name, radius, collection, material):
 def build_bucket_seat(name, x, y, z, collection, mats):
     seat_objs = []
     seat_objs.append(add_box(f"{name}_Base", (x - 0.20, y - 0.18, z), (x + 0.20, y + 0.18, z + 0.14), collection, material=mats["seat"], smooth=True))
-    seat_objs.append(add_box(f"{name}_Back", (x - 0.19, y + 0.04, z + 0.12), (x + 0.19, y + 0.22, z + 0.66), collection, material=mats["seat"], smooth=True))
+    # Backrest is on the rear side (-Y), so occupants face toward the nose (+Y).
+    seat_objs.append(add_box(f"{name}_Back", (x - 0.19, y - 0.22, z + 0.12), (x + 0.19, y - 0.04, z + 0.66), collection, material=mats["seat"], smooth=True))
     seat_objs.append(add_box(f"{name}_Bolster_R", (x + 0.18, y - 0.16, z + 0.03), (x + 0.24, y + 0.18, z + 0.33), collection, material=mats["seat"], smooth=True))
     seat_objs.append(add_box(f"{name}_Bolster_L", (x - 0.24, y - 0.16, z + 0.03), (x - 0.18, y + 0.18, z + 0.33), collection, material=mats["seat"], smooth=True))
-    seat_objs.append(add_box(f"{name}_Headrest", (x - 0.12, y + 0.14, z + 0.62), (x + 0.12, y + 0.22, z + 0.82), collection, material=mats["seat"], smooth=True))
-    seat_objs.append(add_box(f"{name}_HarnessSlot", (x - 0.05, y + 0.18, z + 0.56), (x + 0.05, y + 0.21, z + 0.68), collection, material=mats["interior"], smooth=False))
+    seat_objs.append(add_box(f"{name}_Headrest", (x - 0.12, y - 0.22, z + 0.62), (x + 0.12, y - 0.14, z + 0.82), collection, material=mats["seat"], smooth=True))
+    seat_objs.append(add_box(f"{name}_HarnessSlot", (x - 0.05, y - 0.21, z + 0.56), (x + 0.05, y - 0.18, z + 0.68), collection, material=mats["interior"], smooth=False))
     for o in seat_objs:
         smooth_object(o)
 
