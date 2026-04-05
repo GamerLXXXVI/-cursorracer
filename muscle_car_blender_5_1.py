@@ -642,13 +642,17 @@ def build_hood(ctx, body_data):
     ext = ctx["collections"]["Exterior"]
     mats = ctx["materials"]
 
-    add_box(
+    # Matte hood insert follows hood slope to avoid cutting through body volume.
+    create_thick_panel(
         "Hood_Panel",
-        (-0.70, 0.44, 0.81),
-        (0.70, 1.98, 0.84),
-        ext,
+        (0.70, 0.44, 0.835),
+        (-0.70, 0.44, 0.835),
+        (-0.62, 1.98, 0.805),
+        (0.62, 1.98, 0.805),
+        thickness=0.012,
+        collection=ext,
         material=mats["hood"],
-        smooth=False,
+        smooth=True,
     )
     add_box(
         "Hood_Spine",
