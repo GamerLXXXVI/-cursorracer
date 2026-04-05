@@ -827,14 +827,40 @@ def build_front(ctx):
     add_box("Splitter_Fin_L2", (-0.72, 2.35, 0.05), (-0.68, 2.49, 0.14), ext, material=mats["carbon"], smooth=False)
 
 
+def create_rear_corner_wrap(name, side, collection, material):
+    s = side
+    # Faceted quarter-wrap that tapers toward the wheel opening.
+    verts = [
+        (s * 0.72, -2.40, 0.12),  # inner rear lower
+        (s * 0.94, -2.48, 0.12),  # outer rear lower
+        (s * 0.94, -2.48, 0.46),  # outer rear upper
+        (s * 0.78, -2.40, 0.52),  # inner rear upper
+        (s * 0.84, -2.22, 0.18),  # inner front lower (toward wheel cutout)
+        (s * 0.98, -2.30, 0.20),  # outer front lower
+        (s * 0.98, -2.30, 0.50),  # outer front upper
+        (s * 0.82, -2.22, 0.56),  # inner front upper
+    ]
+    faces = [
+        (0, 1, 2, 3),  # rear face
+        (4, 7, 6, 5),  # front taper face
+        (0, 4, 5, 1),  # lower face
+        (3, 2, 6, 7),  # upper face
+        (0, 3, 7, 4),  # inner face
+        (1, 5, 6, 2),  # outer face
+    ]
+    return make_mesh_object(name, verts, faces, collection, material=material, smooth=True)
+
+
 def build_rear(ctx):
     print("Building rear fascia + taillights + diffuser...")
     ext = ctx["collections"]["Exterior"]
     mats = ctx["materials"]
 
     # Rear bumper shell: lower mass + upper cap to avoid "inside body" appearance.
-    add_box("Rear_Bumper", (-0.94, -2.48, 0.10), (0.94, -2.34, 0.46), ext, material=mats["body"], smooth=True)
-    add_box("Rear_Bumper_Upper", (-0.92, -2.40, 0.40), (0.92, -2.30, 0.60), ext, material=mats["body"], smooth=True)
+    add_box("Rear_Bumper", (-0.72, -2.48, 0.10), (0.72, -2.34, 0.46), ext, material=mats["body"], smooth=True)
+    add_box("Rear_Bumper_Upper", (-0.68, -2.40, 0.40), (0.68, -2.30, 0.60), ext, material=mats["body"], smooth=True)
+    create_rear_corner_wrap("RearCornerWrap_R", 1.0, ext, mats["body"])
+    create_rear_corner_wrap("RearCornerWrap_L", -1.0, ext, mats["body"])
 
     # Integrated ducktail near trunk trailing edge (not a floating wing bar).
     add_box("Ducktail_Spoiler", (-0.84, -2.14, 0.84), (0.84, -2.02, 0.90), ext, material=mats["body"], smooth=True)
