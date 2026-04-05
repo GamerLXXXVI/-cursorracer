@@ -873,6 +873,22 @@ def build_rear(ctx):
     add_box("Rear_Indicator_R", (0.54, -2.58, 0.47), (0.64, -2.54, 0.53), ext, material=mats["indicator"], smooth=False)
     add_box("Rear_Indicator_L", (-0.64, -2.58, 0.47), (-0.54, -2.54, 0.53), ext, material=mats["indicator"], smooth=False)
 
+    # Closeout panels to seal the rear opening and form a proper rear deck wall.
+    create_thick_panel(
+        "Rear_Closure_Upper",
+        (0.80, -2.36, 0.62),
+        (-0.80, -2.36, 0.62),
+        (-0.68, -2.20, 0.86),
+        (0.68, -2.20, 0.86),
+        thickness=0.03,
+        collection=ext,
+        material=mats["body"],
+        smooth=True,
+    )
+    add_box("Rear_Closure_Lower", (-0.80, -2.48, 0.44), (0.80, -2.36, 0.62), ext, material=mats["body"], smooth=True)
+    add_box("Rear_Closure_Side_R", (0.80, -2.40, 0.52), (0.92, -2.22, 0.78), ext, material=mats["body"], smooth=True)
+    add_box("Rear_Closure_Side_L", (-0.92, -2.40, 0.52), (-0.80, -2.22, 0.78), ext, material=mats["body"], smooth=True)
+
     # Rear diffuser with tunnel channels.
     add_box("RearDiffuser_Main", (-0.76, -2.63, 0.04), (0.76, -2.52, 0.18), ext, material=mats["carbon"], smooth=False)
     add_box("Diffuser_TunnelWall_R", (0.18, -2.62, 0.04), (0.22, -2.52, 0.18), ext, material=mats["carbon"], smooth=False)
