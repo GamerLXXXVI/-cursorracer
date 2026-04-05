@@ -1152,12 +1152,12 @@ def build_interior(ctx):
     build_bucket_seat("Seat_Driver", 0.36, -0.22, 0.17, interior, mats)
     build_bucket_seat("Seat_Passenger", -0.36, -0.22, 0.17, interior, mats)
 
-    # Steering wheel: torus rim, spokes, and tilted column.
+    # Steering wheel: torus rim, spokes, and dash-mounted tilted column.
     wheel = create_torus("SteerWheel", major_r=0.17, minor_r=0.019, u_segments=40, v_segments=14, collection=interior, material=mats["alcantara"], smooth=True)
-    wheel.location = (0.36, 0.42, 0.62)
+    wheel.location = (0.36, 0.46, 0.69)
     wheel.rotation_euler = (math.radians(20.0), 0.0, math.pi * 0.5)
     hub = create_cylinder("SteerHub", 0.038, 0.06, 18, interior, material=mats["alu"], smooth=True)
-    hub.location = (0.36, 0.42, 0.62)
+    hub.location = (0.36, 0.46, 0.69)
     hub.rotation_euler = (math.radians(20.0), 0.0, math.pi * 0.5)
     for i in range(3):
         spoke = create_tapered_spoke(
@@ -1170,12 +1170,19 @@ def build_interior(ctx):
             collection=interior,
             material=mats["alu"],
         )
-        spoke.location = (0.36, 0.42, 0.62)
+        spoke.location = (0.36, 0.46, 0.69)
         spoke.rotation_euler = (math.tau * i / 3.0 + math.radians(20.0), 0.0, 0.0)
 
-    col = create_cylinder("SteerColumn", radius=0.024, depth=0.36, segments=14, collection=interior, material=mats["interior"], smooth=True)
-    col.location = (0.34, 0.53, 0.52)
-    col.rotation_euler = Vector((0.02, -0.12, 0.18)).to_track_quat("Z", "Y").to_euler()
+    # Explicit dash anchor prevents floor-mounted appearance.
+    add_box("SteerColumn_Shroud", (0.27, 0.61, 0.54), (0.39, 0.70, 0.63), interior, material=mats["dash"], smooth=True)
+    create_roll_cage_tube(
+        "SteerColumn",
+        p0=(0.33, 0.64, 0.58),   # dash/firewall side
+        p1=(0.35, 0.49, 0.67),   # wheel hub side
+        radius=0.024,
+        collection=interior,
+        material=mats["interior"],
+    )
 
     # Console and shifter.
     add_box("Center_Console", (-0.16, -0.34, 0.26), (0.16, 0.42, 0.46), interior, material=mats["interior"], smooth=True)
