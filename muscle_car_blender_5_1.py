@@ -779,10 +779,11 @@ def build_front(ctx):
     ext = ctx["collections"]["Exterior"]
     mats = ctx["materials"]
 
-    add_box("Front_Bumper", (-0.94, 2.20, 0.12), (0.94, 2.41, 0.58), ext, material=mats["body"], smooth=True)
-    add_box("Front_Grille_Frame", (-0.56, 2.23, 0.30), (0.56, 2.37, 0.56), ext, material=mats["carbon"], smooth=False)
+    # Front fascia is explicitly biased toward +Y so it reads as nose-forward in bird's-eye view.
+    add_box("Front_Bumper", (-0.94, 2.10, 0.12), (0.94, 2.34, 0.58), ext, material=mats["body"], smooth=True)
+    add_box("Front_Grille_Frame", (-0.56, 2.26, 0.30), (0.56, 2.39, 0.56), ext, material=mats["carbon"], smooth=False)
     for i, z in enumerate((0.34, 0.40, 0.46, 0.52)):
-        add_box(f"Grille_Bar_{i}", (-0.53, 2.335, z), (0.53, 2.355, z + 0.012), ext, material=mats["chrome"], smooth=False)
+        add_box(f"Grille_Bar_{i}", (-0.53, 2.355, z), (0.53, 2.375, z + 0.012), ext, material=mats["chrome"], smooth=False)
 
     # Recessed projector headlights and DRL strips.
     for side in (-1.0, 1.0):
@@ -794,7 +795,7 @@ def build_front(ctx):
             collection=ext,
             material=mats["headlight"],
         )
-        lens.location = (0.78 * side, 2.23, 0.58)
+        lens.location = (0.78 * side, 2.34, 0.58)
         lens.rotation_euler = (math.pi * 0.5, 0.0, 0.0)
 
         ring = create_cylinder(
@@ -806,24 +807,24 @@ def build_front(ctx):
             material=mats["chrome"],
             smooth=True,
         )
-        ring.location = (0.78 * side, 2.20, 0.58)
+        ring.location = (0.78 * side, 2.31, 0.58)
         ring.rotation_euler = (math.pi * 0.5, 0.0, 0.0)
 
         add_box(
             f"DRL_{'L' if side < 0 else 'R'}",
-            (0.66 * side - 0.13 * side, 2.205, 0.47),
-            (0.66 * side + 0.13 * side, 2.22, 0.50),
+            (0.66 * side - 0.13 * side, 2.30, 0.47),
+            (0.66 * side + 0.13 * side, 2.32, 0.50),
             ext,
             material=mats["headlight"],
             smooth=False,
         )
 
     # Front splitter with fins.
-    add_box("FrontSplitter_Main", (-0.90, 2.34, 0.05), (0.90, 2.48, 0.10), ext, material=mats["carbon"], smooth=False)
-    add_box("Splitter_Fin_R1", (0.38, 2.35, 0.05), (0.42, 2.47, 0.14), ext, material=mats["carbon"], smooth=False)
-    add_box("Splitter_Fin_L1", (-0.42, 2.35, 0.05), (-0.38, 2.47, 0.14), ext, material=mats["carbon"], smooth=False)
-    add_box("Splitter_Fin_R2", (0.68, 2.35, 0.05), (0.72, 2.47, 0.14), ext, material=mats["carbon"], smooth=False)
-    add_box("Splitter_Fin_L2", (-0.72, 2.35, 0.05), (-0.68, 2.47, 0.14), ext, material=mats["carbon"], smooth=False)
+    add_box("FrontSplitter_Main", (-0.90, 2.34, 0.05), (0.90, 2.50, 0.10), ext, material=mats["carbon"], smooth=False)
+    add_box("Splitter_Fin_R1", (0.38, 2.35, 0.05), (0.42, 2.49, 0.14), ext, material=mats["carbon"], smooth=False)
+    add_box("Splitter_Fin_L1", (-0.42, 2.35, 0.05), (-0.38, 2.49, 0.14), ext, material=mats["carbon"], smooth=False)
+    add_box("Splitter_Fin_R2", (0.68, 2.35, 0.05), (0.72, 2.49, 0.14), ext, material=mats["carbon"], smooth=False)
+    add_box("Splitter_Fin_L2", (-0.72, 2.35, 0.05), (-0.68, 2.49, 0.14), ext, material=mats["carbon"], smooth=False)
 
 
 def build_rear(ctx):
