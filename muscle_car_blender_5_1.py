@@ -663,8 +663,28 @@ def build_hood(ctx, body_data):
         smooth=False,
     )
     # Carbon shut line trim around hood opening.
-    add_box("Hood_ShutLine_Front", (-0.68, 1.97, 0.835), (0.68, 1.99, 0.845), ext, material=mats["carbon"], smooth=False)
-    add_box("Hood_ShutLine_Rear", (-0.68, 0.45, 0.835), (0.68, 0.47, 0.845), ext, material=mats["carbon"], smooth=False)
+    create_thick_panel(
+        "Hood_ShutLine_Front",
+        (0.68, 1.97, 0.812),
+        (-0.68, 1.97, 0.812),
+        (-0.68, 1.99, 0.806),
+        (0.68, 1.99, 0.806),
+        thickness=0.003,
+        collection=ext,
+        material=mats["carbon"],
+        smooth=True,
+    )
+    create_thick_panel(
+        "Hood_ShutLine_Rear",
+        (0.68, 0.45, 0.846),
+        (-0.68, 0.45, 0.846),
+        (-0.68, 0.47, 0.844),
+        (0.68, 0.47, 0.844),
+        thickness=0.003,
+        collection=ext,
+        material=mats["carbon"],
+        smooth=True,
+    )
     create_thick_panel(
         "Hood_ShutLine_R",
         (0.70, 0.47, 0.846),
