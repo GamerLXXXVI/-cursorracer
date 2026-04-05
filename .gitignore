@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+leaderboard.json
+race_debug.log
