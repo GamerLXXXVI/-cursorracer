@@ -832,22 +832,26 @@ def build_rear(ctx):
     ext = ctx["collections"]["Exterior"]
     mats = ctx["materials"]
 
-    # Keep rear elements on the true tail edge so they don't read as buried in the body.
-    add_box("Rear_Bumper", (-0.94, -2.44, 0.14), (0.94, -2.29, 0.62), ext, material=mats["body"], smooth=True)
-    add_box("Ducktail_Spoiler", (-0.84, -2.33, 0.90), (0.84, -2.20, 0.98), ext, material=mats["body"], smooth=True)
-    add_box("Trunk_ShutLine", (-0.86, -2.21, 0.84), (0.86, -2.19, 0.86), ext, material=mats["carbon"], smooth=False)
+    # Rear bumper shell: lower mass + upper cap to avoid "inside body" appearance.
+    add_box("Rear_Bumper", (-0.94, -2.48, 0.10), (0.94, -2.34, 0.46), ext, material=mats["body"], smooth=True)
+    add_box("Rear_Bumper_Upper", (-0.92, -2.40, 0.40), (0.92, -2.30, 0.60), ext, material=mats["body"], smooth=True)
 
-    add_box("TailLight_Bar", (-0.82, -2.36, 0.52), (0.82, -2.32, 0.61), ext, material=mats["taillight"], smooth=False)
-    add_box("TailCluster_R", (0.68, -2.37, 0.48), (0.88, -2.31, 0.63), ext, material=mats["taillight"], smooth=False)
-    add_box("TailCluster_L", (-0.88, -2.37, 0.48), (-0.68, -2.31, 0.63), ext, material=mats["taillight"], smooth=False)
-    add_box("Rear_Indicator_R", (0.54, -2.36, 0.49), (0.64, -2.32, 0.55), ext, material=mats["indicator"], smooth=False)
-    add_box("Rear_Indicator_L", (-0.64, -2.36, 0.49), (-0.54, -2.32, 0.55), ext, material=mats["indicator"], smooth=False)
+    # Integrated ducktail near trunk trailing edge (not a floating wing bar).
+    add_box("Ducktail_Spoiler", (-0.84, -2.14, 0.84), (0.84, -2.02, 0.90), ext, material=mats["body"], smooth=True)
+    add_box("Ducktail_Lip", (-0.84, -2.20, 0.89), (0.84, -2.14, 0.95), ext, material=mats["body"], smooth=True)
+    add_box("Trunk_ShutLine", (-0.86, -2.03, 0.83), (0.86, -2.01, 0.85), ext, material=mats["carbon"], smooth=False)
+
+    add_box("TailLight_Bar", (-0.82, -2.39, 0.50), (0.82, -2.35, 0.59), ext, material=mats["taillight"], smooth=False)
+    add_box("TailCluster_R", (0.68, -2.40, 0.46), (0.88, -2.34, 0.61), ext, material=mats["taillight"], smooth=False)
+    add_box("TailCluster_L", (-0.88, -2.40, 0.46), (-0.68, -2.34, 0.61), ext, material=mats["taillight"], smooth=False)
+    add_box("Rear_Indicator_R", (0.54, -2.39, 0.47), (0.64, -2.35, 0.53), ext, material=mats["indicator"], smooth=False)
+    add_box("Rear_Indicator_L", (-0.64, -2.39, 0.47), (-0.54, -2.35, 0.53), ext, material=mats["indicator"], smooth=False)
 
     # Rear diffuser with tunnel channels.
-    add_box("RearDiffuser_Main", (-0.76, -2.45, 0.04), (0.76, -2.30, 0.20), ext, material=mats["carbon"], smooth=False)
-    add_box("Diffuser_TunnelWall_R", (0.18, -2.44, 0.04), (0.22, -2.30, 0.19), ext, material=mats["carbon"], smooth=False)
-    add_box("Diffuser_TunnelWall_C", (-0.02, -2.44, 0.04), (0.02, -2.30, 0.19), ext, material=mats["carbon"], smooth=False)
-    add_box("Diffuser_TunnelWall_L", (-0.22, -2.44, 0.04), (-0.18, -2.30, 0.19), ext, material=mats["carbon"], smooth=False)
+    add_box("RearDiffuser_Main", (-0.76, -2.49, 0.04), (0.76, -2.36, 0.18), ext, material=mats["carbon"], smooth=False)
+    add_box("Diffuser_TunnelWall_R", (0.18, -2.48, 0.04), (0.22, -2.36, 0.18), ext, material=mats["carbon"], smooth=False)
+    add_box("Diffuser_TunnelWall_C", (-0.02, -2.48, 0.04), (0.02, -2.36, 0.18), ext, material=mats["carbon"], smooth=False)
+    add_box("Diffuser_TunnelWall_L", (-0.22, -2.48, 0.04), (-0.18, -2.36, 0.18), ext, material=mats["carbon"], smooth=False)
 
 
 def create_fender_flare(name, side, cy, cz, collection, material):
